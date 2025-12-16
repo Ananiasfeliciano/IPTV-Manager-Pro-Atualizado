@@ -92,6 +92,7 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const logsEndRef = useRef<HTMLDivElement>(null);
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+    const [healthInfo, setHealthInfo] = useState<string | null>(null);
 
     // Load from LocalStorage
     useEffect(() => {
@@ -116,6 +117,23 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
     const addLog = (level: LogEntry['level'], message: string) => {
         const now = new Date().toLocaleTimeString('pt-BR');
         setLogs(prev => [...prev, { id: Date.now(), level, message, time: now }]);
+    };
+
+    const handleHealthCheck = async () => {
+        try {
+            addLog('INFO', 'Verificando ambiente do servidor...');
+            const resp = await fetch('/api/health');
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            const info = `status=${data.status}, node=${data.nodeVersion}, region=${data.vercelRegion}, GEMINI_API_KEY=${data.geminiKeySet ? 'OK' : 'FALTANDO'}`;
+            setHealthInfo(info);
+            setToast({ message: `Servidor OK • ${info}`, type: 'success' });
+            addLog('SUCCESS', `Saúde do servidor: ${info}`);
+        } catch (e: any) {
+            const msg = `Falha na verificação do servidor: ${e?.message || e}`;
+            setToast({ message: msg, type: 'error' });
+            addLog('ERROR', msg);
+        }
     };
 
     const handleConnect = () => {
@@ -543,6 +561,13 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                                     <div className="bg-indigo-500/10 text-indigo-400 px-4 py-2 rounded-lg border border-indigo-500/20 text-sm font-medium whitespace-nowrap">
                                         {collectionQueue.length} Pendentes
                                     </div>
+                                    <button
+                                        onClick={handleHealthCheck}
+                                        className="flex items-center px-3 py-2 rounded-lg text-xs font-bold transition-all border border-slate-600 bg-slate-700 hover:bg-slate-600 text-slate-200"
+                                        title="Testar ambiente do servidor (API/IA)"
+                                    >
+                                        <Icon name="shield-check" className="w-4 h-4 mr-2" /> Testar Ambiente
+                                    </button>
                                 </div>
                              </div>
                              
