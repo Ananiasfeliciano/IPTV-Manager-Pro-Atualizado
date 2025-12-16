@@ -170,11 +170,6 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
     // --- AI Integration Functions ---
 
     const handleAiImproveTemplate = async () => {
-        if (!process.env.API_KEY || process.env.API_KEY === 'PLACEHOLDER_API_KEY') {
-            alert("Chave de API do Gemini não configurada.");
-            return;
-        }
-        
         setLoadingAi('template');
         addLog('INFO', 'Solicitando melhoria de texto ao Gemini AI...');
         
@@ -191,11 +186,6 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
     };
 
     const handleAiMessageGen = async (item: {sub: Subscription, customer: any, plan: any}, type: 'reminder' | 'payment') => {
-        if (!process.env.API_KEY || process.env.API_KEY === 'PLACEHOLDER_API_KEY') {
-            alert("Chave de API do Gemini não configurada.");
-            return;
-        }
-
         const { sub, customer, plan } = item;
         setLoadingAi(sub.id);
         addLog('INFO', `Gerando mensagem personalizada para ${customer.name} com Gemini...`);
