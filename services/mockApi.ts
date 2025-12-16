@@ -49,6 +49,9 @@ const checkAndUpdateStatuses = async (subscriptions: Subscription[]): Promise<Su
 export const fetchDashboardStats = async (): Promise<DashboardStats> => {
     await simulateNetwork(200); // Shorter delay for dashboard
     
+    // Perform Health Check
+    const dbStatus = await db.checkConnection();
+
     const today = new Date();
     const nextWeek = new Date(today);
     nextWeek.setDate(today.getDate() + 7);
@@ -109,7 +112,8 @@ export const fetchDashboardStats = async (): Promise<DashboardStats> => {
         monthlyRevenue: totalRevenue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
         expiringSoon: validExpiringSoon,
         overdueSubscriptions: activeOverdue,
-        recentActivities
+        recentActivities,
+        dbStatus
     };
 };
 
@@ -184,7 +188,7 @@ export const deleteSubscription = async (subscriptionId: string): Promise<{ id: 
 };
 
 // Renew subscription logic
-export const renewSubscription = async (subscriptionId: string, type: 'PAYMENT' | 'TRUST'): Promise<Subscription> => {
+export const renewSubscription = async (subscriptionId: string, type: 'PAYMENT' | 'TRUST', paymentMethod?: string): Promise<Subscription> => {
     await simulateNetwork();
     const subscription = await db.dbGetById<Subscription>('subscriptions', subscriptionId);
     if (!subscription) throw new Error("Subscription not found");
@@ -215,7 +219,8 @@ export const renewSubscription = async (subscriptionId: string, type: 'PAYMENT' 
         startDate: newStartDate.toISOString(),
         endDate: newEndDate.toISOString(),
         status: type === 'TRUST' ? SubscriptionStatus.TRUST : SubscriptionStatus.ACTIVE,
-        isTrustActivation: type === 'TRUST'
+        isTrustActivation: type === 'TRUST',
+        paymentMethod: type === 'PAYMENT' ? (paymentMethod || 'PIX') : undefined
     };
 
     return db.dbUpdate('subscriptions', updatedSub);

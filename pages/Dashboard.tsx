@@ -100,6 +100,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, stats }) => {
 
   return (
     <div className="space-y-8 animate-fadeIn">
+      {/* DB Status Indicator */}
+      <div className="flex items-center justify-end">
+          <div className={`flex items-center px-3 py-1 rounded-full text-xs font-bold border ${stats.dbStatus ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+              <div className={`w-2 h-2 rounded-full mr-2 ${stats.dbStatus ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+              {stats.dbStatus ? 'Banco de Dados: Operacional' : 'Banco de Dados: ERRO DE CONEXÃO'}
+          </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="animate-fadeInUp" style={{animationDelay: '100ms'}}><StatCard title="Total de Clientes" value={stats.totalCustomers} icon={<Icon name="users" className="w-7 h-7 text-white" />} /></div>
         <div className="animate-fadeInUp" style={{animationDelay: '200ms'}}><StatCard title="Clientes Ativos" value={stats.activeCustomers} icon={<Icon name="check-circle" className="w-7 h-7 text-white" />} /></div>

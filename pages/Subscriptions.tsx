@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { IptvData, Subscription, SubscriptionStatus } from '../types';
+import { IptvData, Subscription, SubscriptionStatus, Customer, Plan } from '../types';
 import { Icon } from '../components/Icon';
 
 interface SubscriptionsProps {
@@ -8,7 +8,7 @@ interface SubscriptionsProps {
     addSubscription: (record: Omit<Subscription, 'id'>) => Promise<void>;
     updateSubscription: (record: Subscription) => Promise<void>;
     deleteSubscription: (id: string) => Promise<void>;
-    renewSubscription: (id: string, type: 'PAYMENT' | 'TRUST') => Promise<void>;
+    renewSubscription: (id: string, type: 'PAYMENT' | 'TRUST', paymentMethod?: string) => Promise<void>;
   };
 }
 
@@ -31,6 +31,7 @@ const SubscriptionForm: React.FC<{
     serverId: record?.serverId || '',
     startDate: record?.startDate ? record.startDate.split('T')[0] : new Date().toISOString().split('T')[0],
     isTrustActivation: record?.isTrustActivation || false,
+    paymentMethod: record?.paymentMethod || 'PIX', // Default to PIX
   });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -90,7 +91,18 @@ const SubscriptionForm: React.FC<{
                 {servers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
-          <input type="date" name="startDate" value={formData.startDate} onChange={handleChange} className={inputClasses} required />
+          
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input type="date" name="startDate" value={formData.startDate} onChange={handleChange} className={inputClasses} required />
+                <select name="paymentMethod" value={formData.paymentMethod} onChange={handleChange} className={inputClasses}>
+                    <option value="PIX">PIX</option>
+                    <option value="Dinheiro">Dinheiro</option>
+                    <option value="Cartão de Crédito">Cartão de Crédito</option>
+                    <option value="Cartão de Débito">Cartão de Débito</option>
+                    <option value="Boleto">Boleto</option>
+                </select>
+           </div>
+
           <div className="flex items-center pt-2">
             <input type="checkbox" id="isTrustActivation" name="isTrustActivation" checked={formData.isTrustActivation} onChange={handleChange} className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 bg-slate-700 border-slate-600 rounded" />
             <label htmlFor="isTrustActivation" className="ml-3 block text-sm text-slate-300">Ativação na Confiança</label>
@@ -107,13 +119,13 @@ const SubscriptionForm: React.FC<{
 };
 
 const RenewalModal: React.FC<{
-    subscription: Subscription;
-    data: IptvData;
-    onConfirm: (type: 'PAYMENT' | 'TRUST') => void;
+    title: string;
+    subtitle: React.ReactNode;
+    info?: string;
+    onConfirm: (type: 'PAYMENT' | 'TRUST', paymentMethod: string) => void;
     onCancel: () => void;
-}> = ({ subscription, data, onConfirm, onCancel }) => {
-    const customer = data.customers.find(c => c.id === subscription.customerId);
-    const plan = data.plans.find(p => p.id === subscription.planId);
+}> = ({ title, subtitle, info, onConfirm, onCancel }) => {
+    const [selectedMethod, setSelectedMethod] = useState('PIX');
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 animate-fadeIn p-4">
@@ -122,28 +134,46 @@ const RenewalModal: React.FC<{
                     <div className="bg-indigo-500/20 p-3 rounded-full inline-block mb-3">
                          <Icon name="arrow-path" className="w-8 h-8 text-indigo-400" />
                     </div>
-                    <h2 className="text-xl font-bold text-white">Renovar Assinatura</h2>
-                    <p className="text-slate-400 mt-2">Escolha o tipo de renovação para <strong>{customer?.name}</strong>.</p>
-                    <p className="text-sm text-slate-500 mt-1">Plano: {plan?.name} ({plan?.durationDays} dias)</p>
+                    <h2 className="text-xl font-bold text-white">{title}</h2>
+                    <p className="text-slate-400 mt-2">{subtitle}</p>
+                    {info && <p className="text-sm text-slate-500 mt-1">{info}</p>}
+                </div>
+
+                <div className="mb-4">
+                    <label className="text-sm font-medium text-slate-300 mb-1 block">Método de Pagamento</label>
+                    <select 
+                        value={selectedMethod} 
+                        onChange={(e) => setSelectedMethod(e.target.value)}
+                        className="bg-slate-700 text-white p-2.5 rounded-lg w-full border border-slate-600 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    >
+                        <option value="PIX">PIX (Enviar Mensagem)</option>
+                        <option value="Dinheiro">Dinheiro</option>
+                        <option value="Cartão de Crédito">Cartão de Crédito</option>
+                        <option value="Cartão de Débito">Cartão de Débito</option>
+                        <option value="Boleto">Boleto</option>
+                    </select>
                 </div>
                 
                 <div className="space-y-3">
                     <button 
-                        onClick={() => onConfirm('PAYMENT')}
+                        onClick={() => onConfirm('PAYMENT', selectedMethod)}
                         className="w-full flex items-center justify-between p-4 bg-slate-700 hover:bg-green-900/30 border border-slate-600 hover:border-green-500 rounded-lg transition-all group"
                     >
                         <div className="flex items-center">
                             <Icon name="banknotes" className="w-6 h-6 text-green-400 mr-3 group-hover:scale-110 transition-transform" />
                             <div className="text-left">
-                                <p className="font-semibold text-white">Pagamento Confirmado</p>
-                                <p className="text-xs text-slate-400">Ativa o plano e confirma a receita.</p>
+                                <p className="font-semibold text-white">Confirmar Renovação</p>
+                                <p className="text-xs text-slate-400">
+                                    Status: Ativa | Método: {selectedMethod}
+                                    {selectedMethod === 'PIX' && ' | Envia Msg'}
+                                </p>
                             </div>
                         </div>
                         <Icon name="check-circle" className="w-5 h-5 text-slate-600 group-hover:text-green-500" />
                     </button>
 
                     <button 
-                        onClick={() => onConfirm('TRUST')}
+                        onClick={() => onConfirm('TRUST', selectedMethod)}
                         className="w-full flex items-center justify-between p-4 bg-slate-700 hover:bg-blue-900/30 border border-slate-600 hover:border-blue-500 rounded-lg transition-all group"
                     >
                         <div className="flex items-center">
@@ -170,6 +200,11 @@ export const Subscriptions: React.FC<SubscriptionsProps> = ({ data, actions }) =
   const [isRenewalModalOpen, setIsRenewalModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<Subscription | null>(null);
   const [renewingRecord, setRenewingRecord] = useState<Subscription | null>(null);
+  
+  // Selection State
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkMode, setIsBulkMode] = useState(false);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; order: SortOrder }>({ key: 'endDate', order: 'desc' });
 
@@ -215,6 +250,25 @@ export const Subscriptions: React.FC<SubscriptionsProps> = ({ data, actions }) =
     return '▼';
   }
 
+  // Selection Logic
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.checked) {
+          setSelectedIds(new Set(filteredAndSortedSubs.map(s => s.id)));
+      } else {
+          setSelectedIds(new Set());
+      }
+  };
+
+  const handleSelectOne = (id: string) => {
+      const newSelected = new Set(selectedIds);
+      if (newSelected.has(id)) {
+          newSelected.delete(id);
+      } else {
+          newSelected.add(id);
+      }
+      setSelectedIds(newSelected);
+  };
+
   const handleSave = (recordData: Subscription | Omit<Subscription, 'id'>) => {
     if ('id' in recordData) {
       actions.updateSubscription(recordData);
@@ -225,12 +279,55 @@ export const Subscriptions: React.FC<SubscriptionsProps> = ({ data, actions }) =
     setEditingRecord(null);
   };
   
-  const handleRenew = (type: 'PAYMENT' | 'TRUST') => {
-      if (renewingRecord) {
-          actions.renewSubscription(renewingRecord.id, type);
-          setIsRenewalModalOpen(false);
-          setRenewingRecord(null);
+  const handleRenew = async (type: 'PAYMENT' | 'TRUST', paymentMethod: string) => {
+      const subsToRenew = isBulkMode 
+        ? filteredAndSortedSubs.filter(s => selectedIds.has(s.id))
+        : (renewingRecord ? [renewingRecord] : []);
+
+      for(const sub of subsToRenew) {
+          // 1. Update Database
+          await actions.renewSubscription(sub.id, type, paymentMethod);
+          
+          // 2. WhatsApp Logic (Only if Payment + PIX)
+          if (type === 'PAYMENT' && paymentMethod === 'PIX') {
+              const customer = customers.find(c => c.id === sub.customerId);
+              const plan = plans.find(p => p.id === sub.planId);
+              
+              if (customer && plan) {
+                   const savedTemplates = localStorage.getItem('iptv_msg_templates');
+                   const pixKey = localStorage.getItem('iptv_pix_key') || 'CHAVE-PIX-AQUI';
+                   const pixName = localStorage.getItem('iptv_pix_name') || 'Nome Beneficiario';
+                   
+                   let message = '';
+                   if (savedTemplates) {
+                       const templates = JSON.parse(savedTemplates);
+                       if (templates.payment) message = templates.payment.content;
+                   }
+                   
+                   if (!message) {
+                        message = `Olá *{cliente_nome}*, segue os dados PIX para o plano *{plano_nome}* (R$ {valor}):\n\n🔑 Chave: {pix_chave}\n👤 Nome: {pix_nome}`;
+                   }
+                   
+                   message = message
+                    .replace(/{cliente_nome}/g, customer.name)
+                    .replace(/{plano_nome}/g, plan.name)
+                    .replace(/{valor}/g, plan.price.toFixed(2).replace('.', ','))
+                    .replace(/{pix_chave}/g, pixKey)
+                    .replace(/{pix_nome}/g, pixName);
+
+                   const phone = customer.phone.replace(/\D/g, '');
+                   const fullPhone = '55' + phone;
+                   
+                   // Small delay to prevent blocking if multiple (though bulk open is risky)
+                   window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(message)}`, '_blank');
+              }
+          }
       }
+
+      setSelectedIds(new Set());
+      setIsRenewalModalOpen(false);
+      setRenewingRecord(null);
+      setIsBulkMode(false);
   }
 
   const openAddModal = () => {
@@ -245,6 +342,13 @@ export const Subscriptions: React.FC<SubscriptionsProps> = ({ data, actions }) =
 
   const openRenewalModal = (record: Subscription) => {
       setRenewingRecord(record);
+      setIsBulkMode(false);
+      setIsRenewalModalOpen(true);
+  }
+
+  const openBulkRenewalModal = () => {
+      if (selectedIds.size === 0) return;
+      setIsBulkMode(true);
       setIsRenewalModalOpen(true);
   }
 
@@ -252,6 +356,43 @@ export const Subscriptions: React.FC<SubscriptionsProps> = ({ data, actions }) =
     if (window.confirm('Tem certeza que deseja excluir esta assinatura? Esta ação não pode ser desfeita.')) {
       actions.deleteSubscription(subscriptionId);
     }
+  };
+  
+  const handleSendPaymentMessage = (sub: Subscription) => {
+      const customer = customers.find(c => c.id === sub.customerId);
+      const plan = plans.find(p => p.id === sub.planId);
+      if(!customer || !plan) return;
+
+      const savedTemplates = localStorage.getItem('iptv_msg_templates');
+      const pixKey = localStorage.getItem('iptv_pix_key') || 'CHAVE-PIX-AQUI';
+      const pixName = localStorage.getItem('iptv_pix_name') || 'Nome Beneficiario';
+      
+      let message = '';
+
+      if (savedTemplates) {
+          const templates = JSON.parse(savedTemplates);
+          // Prefer Payment Template if exists, otherwise fallback
+          if (templates.payment) {
+              message = templates.payment.content;
+          }
+      }
+
+      // Default message if no template found
+      if (!message) {
+          message = `Olá *{cliente_nome}*, para renovar o plano *{plano_nome}* no valor de *R$ {valor}*, use o PIX abaixo:\n\n🔑 Chave: {pix_chave}\n👤 Nome: {pix_nome}`;
+      }
+
+      // Replace variables
+      message = message
+        .replace(/{cliente_nome}/g, customer.name)
+        .replace(/{plano_nome}/g, plan.name)
+        .replace(/{valor}/g, plan.price.toFixed(2).replace('.', ','))
+        .replace(/{pix_chave}/g, pixKey)
+        .replace(/{pix_nome}/g, pixName);
+
+      const phone = customer.phone.replace(/\D/g, '');
+      const fullPhone = '55' + phone;
+      window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   const getStatusBadgeColor = (status: SubscriptionStatus) => {
@@ -264,11 +405,42 @@ export const Subscriptions: React.FC<SubscriptionsProps> = ({ data, actions }) =
     }
   }
 
+  // Calculate modal props dynamically
+  const modalProps = useMemo(() => {
+      if (isBulkMode) {
+          return {
+              title: "Renovar em Massa",
+              subtitle: <span>Deseja renovar <strong>{selectedIds.size}</strong> assinaturas selecionadas?</span>,
+              info: "A data de validade será estendida conforme o plano de cada cliente."
+          };
+      } else if (renewingRecord) {
+          const customer = customers.find(c => c.id === renewingRecord.customerId);
+          const plan = plans.find(p => p.id === renewingRecord.planId);
+          return {
+              title: "Renovar Assinatura",
+              subtitle: <span>Escolha o tipo de renovação para <strong>{customer?.name}</strong>.</span>,
+              info: `Plano: ${plan?.name} (${plan?.durationDays} dias)`
+          };
+      }
+      return { title: "", subtitle: null };
+  }, [isBulkMode, renewingRecord, selectedIds.size, customers, plans]);
+
   return (
     <div className="bg-slate-800 rounded-xl shadow-lg p-6 border border-slate-700 animate-fadeInUp">
       <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
         <h2 className="text-xl font-semibold text-white">Registros de Assinatura</h2>
+        
         <div className="flex items-center gap-4 w-full md:w-auto">
+            {selectedIds.size > 0 && (
+                <button 
+                    onClick={openBulkRenewalModal}
+                    className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-lg shadow-green-600/20 flex items-center animate-fadeIn"
+                >
+                    <Icon name="arrow-path" className="w-4 h-4 mr-2" />
+                    Renovar Selecionadas ({selectedIds.size})
+                </button>
+            )}
+            
             <input 
                 type="text"
                 placeholder="Buscar assinatura..."
@@ -283,18 +455,34 @@ export const Subscriptions: React.FC<SubscriptionsProps> = ({ data, actions }) =
         <table className="w-full text-left">
           <thead className="border-b border-slate-700">
             <tr className="text-slate-400 uppercase text-sm">
+              <th className="p-4 w-10">
+                  <input 
+                    type="checkbox" 
+                    onChange={handleSelectAll} 
+                    checked={filteredAndSortedSubs.length > 0 && selectedIds.size === filteredAndSortedSubs.length}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-800"
+                  />
+              </th>
               <th className="p-4 cursor-pointer min-w-[150px]" onClick={() => requestSort('customerName')}>Cliente {getSortIcon('customerName')}</th>
               <th className="p-4 cursor-pointer min-w-[150px]" onClick={() => requestSort('planName')}>Plano {getSortIcon('planName')}</th>
               <th className="p-4 cursor-pointer min-w-[140px]" onClick={() => requestSort('startDate')}>Início {getSortIcon('startDate')}</th>
               <th className="p-4 cursor-pointer min-w-[140px]" onClick={() => requestSort('endDate')}>Vencimento {getSortIcon('endDate')}</th>
               <th className="p-4 cursor-pointer min-w-[100px]" onClick={() => requestSort('status')}>Status {getSortIcon('status')}</th>
-              <th className="p-4 text-right min-w-[160px]">Ações</th>
+              <th className="p-4 text-right min-w-[180px]">Ações</th>
             </tr>
           </thead>
           <tbody>
             {filteredAndSortedSubs.length > 0 ? (
                 filteredAndSortedSubs.map(record => (
-                  <tr key={record.id} className="border-b border-slate-800 hover:bg-slate-700/50 transition-colors">
+                  <tr key={record.id} className={`border-b border-slate-800 transition-colors ${selectedIds.has(record.id) ? 'bg-indigo-900/20 hover:bg-indigo-900/30' : 'hover:bg-slate-700/50'}`}>
+                    <td className="p-4">
+                        <input 
+                            type="checkbox" 
+                            checked={selectedIds.has(record.id)}
+                            onChange={() => handleSelectOne(record.id)}
+                            className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-800"
+                        />
+                    </td>
                     <td className="p-4 font-medium text-white">{record.customerName}</td>
                     <td className="p-4 text-slate-300">{record.planName}</td>
                     <td className="p-4 text-slate-300">{new Date(record.startDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</td>
@@ -306,11 +494,14 @@ export const Subscriptions: React.FC<SubscriptionsProps> = ({ data, actions }) =
                     </td>
                     <td className="p-4 text-right">
                       <div className="flex justify-end items-center space-x-2">
+                        <button title="Cobrar (WhatsApp)" onClick={() => handleSendPaymentMessage(record)} className="p-2 rounded-lg bg-green-500/10 text-green-400 hover:bg-green-500 hover:text-white transition-colors">
+                            <Icon name="whatsapp" className="w-4 h-4 fill-current" />
+                        </button>
                         <button title="Renovar" onClick={() => openRenewalModal(record)} className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500 hover:text-white transition-colors">
                             <Icon name="arrow-path" className="w-4 h-4" />
                         </button>
                         <button title="Editar" onClick={() => openEditModal(record)} className="p-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white transition-colors">
-                             <span className="text-xs font-bold">Editar</span>
+                             <Icon name="pencil" className="w-4 h-4" /> 
                         </button>
                         <button title="Excluir" onClick={() => handleDelete(record.id)} className="p-2 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white transition-colors">
                             <Icon name="x-mark" className="w-4 h-4" />
@@ -321,7 +512,7 @@ export const Subscriptions: React.FC<SubscriptionsProps> = ({ data, actions }) =
                 ))
             ) : (
                 <tr>
-                    <td colSpan={6} className="text-center py-10 text-slate-400">
+                    <td colSpan={7} className="text-center py-10 text-slate-400">
                         <div className="flex flex-col items-center">
                             <Icon name="calendar" className="w-12 h-12 mb-2 text-slate-500" />
                             <h3 className="text-lg font-semibold">Nenhuma assinatura encontrada</h3>
@@ -341,12 +532,13 @@ export const Subscriptions: React.FC<SubscriptionsProps> = ({ data, actions }) =
           onCancel={() => { setIsModalOpen(false); setEditingRecord(null); }}
         />
       )}
-      {isRenewalModalOpen && renewingRecord && (
+      {isRenewalModalOpen && (
           <RenewalModal 
-            subscription={renewingRecord}
-            data={data}
+            title={modalProps.title}
+            subtitle={modalProps.subtitle}
+            info={modalProps.info}
             onConfirm={handleRenew}
-            onCancel={() => { setIsRenewalModalOpen(false); setRenewingRecord(null); }}
+            onCancel={() => { setIsRenewalModalOpen(false); setRenewingRecord(null); setIsBulkMode(false); }}
           />
       )}
     </div>

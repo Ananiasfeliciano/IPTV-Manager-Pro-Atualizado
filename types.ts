@@ -1,3 +1,4 @@
+
 export enum SubscriptionStatus {
   ACTIVE = 'Ativa',
   OVERDUE = 'Vencida',
@@ -40,6 +41,7 @@ export interface Subscription {
   endDate: string;   // ISO 8601
   status: SubscriptionStatus;
   isTrustActivation: boolean;
+  paymentMethod?: string;
 }
 
 export interface ActivityItem {
@@ -56,6 +58,7 @@ export interface DashboardStats {
     expiringSoon: Subscription[];
     overdueSubscriptions: Subscription[];
     recentActivities: ActivityItem[];
+    dbStatus: boolean;
 }
 
 export interface IptvData {
@@ -63,4 +66,11 @@ export interface IptvData {
   servers: Server[];
   plans: Plan[];
   subscriptions: Subscription[];
+}
+
+export interface ExternalPanelConfig {
+    url: string;
+    username: string;
+    password: string;
+    userPrefix?: string;
 }

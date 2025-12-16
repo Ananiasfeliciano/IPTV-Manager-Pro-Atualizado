@@ -51,7 +51,7 @@ const CustomerForm: React.FC<{
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <input type="text" name="name" value={formData.name} onChange={handleChange} placeholder="Nome Completo" className={inputClasses} required />
-            <input type="tel" name="phone" value={formData.phone} onChange={handleChange} placeholder="Telefone" className={inputClasses} />
+            <input type="tel" name="phone" value={formData.phone} onChange={handleChange} placeholder="(XX) XXXXX-XXXX" className={inputClasses} />
           </div>
           <input type="text" name="appName" value={formData.appName} onChange={handleChange} placeholder="Nome do Aplicativo" className={inputClasses} required />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -75,7 +75,7 @@ export const Customers: React.FC<CustomersProps> = ({ data, actions }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; order: SortOrder }>({ key: 'createdAt', order: 'desc' });
 
-  const { customers, subscriptions } = data;
+  const { customers, subscriptions, servers } = data;
 
   const filteredAndSortedCustomers = useMemo(() => {
     let filtered = customers.filter(customer => 
@@ -126,6 +126,39 @@ export const Customers: React.FC<CustomersProps> = ({ data, actions }) => {
   const openEditModal = (customer: Customer) => {
     setEditingCustomer(customer);
     setIsModalOpen(true);
+  };
+  
+  const handleSendAccessData = (customer: Customer) => {
+      const savedTemplates = localStorage.getItem('iptv_msg_templates');
+      const activeSub = subscriptions.find(s => s.customerId === customer.id && (s.status === 'Ativa' || s.status === 'Confiança'));
+      const server = activeSub ? servers.find(s => s.id === activeSub.serverId) : null;
+      
+      let message = '';
+      if (savedTemplates) {
+          const templates = JSON.parse(savedTemplates);
+          if (templates.welcome) {
+              message = templates.welcome.content;
+          }
+      }
+      
+      if (!message) {
+           message = `Olá *{cliente_nome}*! Aqui estão seus dados:\n\n👤 Usuário: {login}\n🔑 Senha: {senha}\n🌐 URL: {url_servidor}`;
+      }
+      
+      // Default / Placeholder values if data is missing or note based
+      const login = customer.notes?.match(/user:(\w+)/i)?.[1] || "user_teste";
+      const pass = customer.notes?.match(/pass:(\w+)/i)?.[1] || "1234";
+      
+      message = message
+        .replace(/{cliente_nome}/g, customer.name)
+        .replace(/{login}/g, login) // In a real app, this would come from a dedicated field
+        .replace(/{senha}/g, pass) // In a real app, this would come from a dedicated field
+        .replace(/{url_servidor}/g, server?.url || 'http://url-do-painel.com')
+        .replace(/{app_nome}/g, customer.appName);
+
+      const phone = customer.phone.replace(/\D/g, '');
+      const fullPhone = '55' + phone;
+      window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(message)}`, '_blank');
   };
   
   const getCustomerStatus = (customerId: string) => {
@@ -185,9 +218,16 @@ export const Customers: React.FC<CustomersProps> = ({ data, actions }) => {
                     <td className="p-4 text-slate-300 font-mono text-xs">{customer.key || 'N/A'}</td>
                     <td className="p-4 text-slate-300">{new Date(customer.createdAt).toLocaleDateString('pt-BR', {timeZone: 'UTC'})}</td>
                     <td className="p-4">{getCustomerStatus(customer.id)}</td>
-                    <td className="p-4 text-right space-x-4">
-                      <button onClick={() => openEditModal(customer)} className="font-medium text-indigo-400 hover:text-indigo-300 transition-colors">Editar</button>
-                      <button onClick={() => actions.deleteCustomer(customer.id)} className="font-medium text-red-400 hover:text-red-300 transition-colors">Excluir</button>
+                    <td className="p-4 text-right space-x-2">
+                      <button title="Enviar Dados" onClick={() => handleSendAccessData(customer)} className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500 hover:text-white transition-colors">
+                         <Icon name="whatsapp" className="w-4 h-4 fill-current" />
+                      </button>
+                      <button title="Editar" onClick={() => openEditModal(customer)} className="p-2 rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white transition-colors">
+                         <Icon name="pencil" className="w-4 h-4" />
+                      </button>
+                      <button title="Excluir" onClick={() => actions.deleteCustomer(customer.id)} className="p-2 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white transition-colors">
+                         <Icon name="x-mark" className="w-4 h-4" />
+                      </button>
                     </td>
                   </tr>
                 ))

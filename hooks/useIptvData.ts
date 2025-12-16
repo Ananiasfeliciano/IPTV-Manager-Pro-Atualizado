@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { IptvData, Customer, Subscription, Server, Plan, DashboardStats } from '../types';
+import { IptvData, Customer, Subscription, Server, Plan, DashboardStats, ExternalPanelConfig, SubscriptionStatus } from '../types';
 import * as api from '../services/mockApi';
+import { fetchExternalUsers } from '../services/integrationService';
 
 export const useIptvData = () => {
   const [data, setData] = useState<IptvData>({
@@ -74,6 +75,69 @@ export const useIptvData = () => {
     }
   };
 
+  // Import Action
+  const importFromPanel = async (config: ExternalPanelConfig, defaultServerId: string, defaultPlanId: string) => {
+      setLoading(true);
+      setError(null);
+      setSuccess(null);
+      
+      try {
+          const { customers, subscriptions } = await fetchExternalUsers(config);
+          
+          if (customers.length === 0) {
+              setError("Nenhum usuário encontrado no painel ou erro de conexão (Verifique CORS).");
+              setLoading(false);
+              return;
+          }
+
+          let importedCount = 0;
+
+          // Processar inserção sequencialmente para evitar locks no DB simulado
+          for (let i = 0; i < customers.length; i++) {
+              const custData = customers[i];
+              const subData = subscriptions[i];
+
+              // Verificar duplicidade (simplificado pelo nome/username)
+              const exists = data.customers.find(c => c.name === custData.name);
+              
+              if (!exists && custData.name) {
+                  // Adicionar Cliente
+                  const newCustomer = await api.addCustomer({
+                      name: custData.name,
+                      phone: custData.phone || '',
+                      appName: custData.appName || 'Painel',
+                      notes: custData.notes,
+                      mac: '',
+                      key: ''
+                  });
+
+                  // Adicionar Assinatura
+                  if (subData) {
+                      await api.addSubscription({
+                          customerId: newCustomer.id,
+                          planId: defaultPlanId,
+                          serverId: defaultServerId,
+                          startDate: subData.startDate || new Date().toISOString(),
+                          endDate: subData.endDate || new Date().toISOString(),
+                          status: subData.status || SubscriptionStatus.ACTIVE,
+                          isTrustActivation: false
+                      });
+                  }
+                  importedCount++;
+              }
+          }
+
+          setSuccess(`${importedCount} clientes importados com sucesso!`);
+          await fetchMainData();
+          fetchStats();
+
+      } catch (err) {
+          setError(`Erro na importação: ${err instanceof Error ? err.message : 'Erro desconhecido'}. Tente usar uma extensão CORS Unblocker.`);
+      } finally {
+          setLoading(false);
+      }
+  };
+
   // Customer Actions
   const addCustomer = async (customerData: Omit<Customer, 'id' | 'createdAt'>) => {
     await handleApiCall(api.addCustomer(customerData), () => {}, 'Cliente adicionado com sucesso!');
@@ -95,9 +159,9 @@ export const useIptvData = () => {
   const deleteSubscription = async (subscriptionId: string) => {
     await handleApiCall(api.deleteSubscription(subscriptionId), () => {}, 'Assinatura excluída com sucesso!');
   };
-  const renewSubscription = async (subscriptionId: string, type: 'PAYMENT' | 'TRUST') => {
+  const renewSubscription = async (subscriptionId: string, type: 'PAYMENT' | 'TRUST', paymentMethod?: string) => {
       const msg = type === 'PAYMENT' ? 'Assinatura renovada (Pagamento)!' : 'Assinatura renovada (Confiança)!';
-      await handleApiCall(api.renewSubscription(subscriptionId, type), () => {}, msg);
+      await handleApiCall(api.renewSubscription(subscriptionId, type, paymentMethod), () => {}, msg);
   }
 
   // Server Actions
@@ -142,5 +206,6 @@ export const useIptvData = () => {
     addPlan,
     updatePlan,
     deletePlan,
+    importFromPanel
   };
 };

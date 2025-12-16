@@ -86,7 +86,7 @@ export default function App() {
       case 'expenses':
         return <Expenses data={data} />;
       case 'automation':
-        return <Automation />;
+        return <Automation data={data} />;
       default:
         return <Dashboard data={data} stats={dashboardStats} />;
     }

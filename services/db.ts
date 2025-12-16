@@ -95,6 +95,26 @@ const openDB = (): Promise<IDBDatabase> => {
 
 // Generic CRUD Operations
 
+export const checkConnection = async (): Promise<boolean> => {
+    try {
+        const db = await openDB();
+        return new Promise((resolve) => {
+            const transaction = db.transaction('customers', 'readonly');
+            const store = transaction.objectStore('customers');
+            const request = store.count();
+            
+            request.onsuccess = () => resolve(true);
+            request.onerror = () => resolve(false);
+            
+            // Timeout safety
+            setTimeout(() => resolve(false), 2000);
+        });
+    } catch (e) {
+        console.error("Database connection check failed:", e);
+        return false;
+    }
+}
+
 export const dbGetAll = async <T>(storeName: string): Promise<T[]> => {
   const db = await openDB();
   return new Promise((resolve, reject) => {

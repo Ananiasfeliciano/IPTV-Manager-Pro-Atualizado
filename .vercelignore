@@ -1,0 +1,9 @@
+# Exclude unnecessary files from Vercel build context
+node_modules/
+.vscode/
+.DS_Store
+.git/
+.gitignore
+.env*
+*.log
+**/*.map
