@@ -42,3 +42,22 @@ View your app in AI Studio: https://ai.studio/apps/drive/10ue5-uU4W1KhGbUEf_eS-O
 Notas importantes:
 - Este projeto é um SPA (Vite). O arquivo `vercel.json` já inclui o fallback de rotas para `index.html`.
 - A chave `GEMINI_API_KEY` definida no Vercel é injetada em build-time nas variáveis do cliente; para maior segurança, considere mover as chamadas de IA para uma API Route (serverless) e não expor a chave no cliente.
+
+## Desenvolvimento com rotas serverless (Vercel CLI)
+
+Para usar a rota `api/ai` localmente, utilize o Vercel CLI:
+
+1. Instale a CLI e faça login:
+   ```bash
+   npm i -g vercel
+   vercel login
+   ```
+2. Defina sua variável local (opcional, a CLI pode pedir):
+   ```bash
+   vercel env add GEMINI_API_KEY development
+   ```
+3. Rode o ambiente de desenvolvimento com funções:
+   ```bash
+   npm run dev:vercel
+   ```
+   Isso simula as Serverless Functions (`api/*`) enquanto você desenvolve.

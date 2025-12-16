@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Icon } from '../components/Icon';
 import { IptvData, Subscription, SubscriptionStatus } from '../types';
 import { generatePersonalizedMessage, improveTemplateText } from '../services/aiService';
+import { Toast } from '../components/Toast';
 
 // Tipos para os templates
 type TemplateType = 'welcome' | 'reminder' | 'overdue' | 'payment';
@@ -90,6 +91,7 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
     // Logs
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const logsEndRef = useRef<HTMLDivElement>(null);
+    const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
     // Load from LocalStorage
     useEffect(() => {
@@ -179,8 +181,10 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
         if (improvedText && improvedText !== currentText) {
             handleTemplateChange(improvedText);
             addLog('SUCCESS', 'Template melhorado com Inteligência Artificial!');
+            setToast({ message: 'Template melhorado com IA.', type: 'success' });
         } else {
             addLog('WARN', 'Não foi possível melhorar o texto ou a IA retornou vazio.');
+            setToast({ message: 'IA não retornou melhoria. Verifique GEMINI_API_KEY no servidor.', type: 'error' });
         }
         setLoadingAi(null);
     };
@@ -217,8 +221,10 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
             const fullPhone = '55' + phone;
             window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(finalMessage)}`, '_blank');
             addLog('SUCCESS', `Mensagem IA enviada para ${customer.name}`);
+            setToast({ message: `Mensagem IA gerada para ${customer.name}.`, type: 'success' });
         } else {
             addLog('ERROR', 'Falha ao gerar mensagem com IA. Tente o envio padrão.');
+            setToast({ message: 'Falha na IA. Verifique GEMINI_API_KEY no servidor.', type: 'error' });
         }
     };
 
@@ -637,5 +643,6 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                 </div>
             )}
         </div>
+        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     );
 };
