@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IPTV Manager Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      :root {
+        --color-primary: 79 70 229; /* indigo-600 */
+        --color-background: 15 23 42; /* slate-900 */
+        --color-card: 30 41 59; /* slate-800 */
+        --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+      }
+
+      body {
+        font-family: var(--font-sans);
+      }
+
+      /* Custom scrollbar for a more modern look */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: rgb(var(--color-background));
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #475569; /* slate-600 */
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #64748b; /* slate-500 */
+      }
+      
+      /* Animations */
+      @keyframes fadeInUp {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      .animate-fadeIn {
+        animation: fadeIn 0.5s ease-out forwards;
+      }
+      
+      .animate-fadeInUp {
+        animation: fadeInUp 0.5s ease-out forwards;
+      }
+
+      /* Print-specific styles */
+      @media print {
+        body {
+          background-color: #ffffff !important;
+          color: #000000 !important;
+        }
+        
+        aside, header, .print-hidden {
+          display: none !important;
+        }
+
+        main {
+          padding: 0 !important;
+          overflow: visible !important;
+          margin: 1.5rem !important;
+        }
+
+        .print-container {
+          width: 100% !important;
+          max-width: 100% !important;
+          box-shadow: none !important;
+          border: 1px solid #e2e8f0;
+          padding: 1rem !important;
+        }
+        
+        .bg-gray-800, .bg-gray-700, .bg-gray-900,
+        .bg-slate-800, .bg-slate-700, .bg-slate-900 {
+            background-color: #ffffff !important;
+            color: #000000 !important;
+        }
+        
+        .text-white, .text-gray-100, .text-gray-300, .text-gray-400,
+        .text-slate-100, .text-slate-300, .text-slate-400 {
+            color: #000000 !important;
+            fill: #000000 !important;
+        }
+        
+        .text-indigo-300 {
+            color: #3730a3 !important;
+        }
+
+        table, tr, td, th {
+            border-color: #cccccc !important;
+        }
+
+        .expenses-grid {
+            grid-template-columns: 1fr !important;
+        }
+
+        .print-no-max-h {
+            max-height: none !important;
+        }
+      }
+    </style>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-slate-900 text-slate-100 antialiased">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
