@@ -119,6 +119,10 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
         setLogs(prev => [...prev, { id: Date.now(), level, message, time: now }]);
     };
 
+    const handleToastClose = () => {
+        setToast(null);
+    };
+
     const handleHealthCheck = async () => {
         try {
             addLog('INFO', 'Verificando ambiente do servidor...');
@@ -406,7 +410,7 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
 
                         <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-lg flex-1 flex flex-col overflow-hidden">
                             <div className="p-4 border-b border-slate-700 bg-slate-800/50 flex flex-wrap gap-2">
-                                {Object.values(templates).map((tpl) => (
+                                {(Object.values(templates) as MessageTemplate[]).map((tpl) => (
                                     <button
                                         key={tpl.type}
                                         onClick={() => setActiveTab(tpl.type)}
@@ -667,7 +671,13 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                     </div>
                 </div>
             )}
+        {toast && (
+            <Toast
+                message={toast.message}
+                type={toast.type}
+                onClose={handleToastClose}
+            />
+        )}
         </div>
-        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     );
 };

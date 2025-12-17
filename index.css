@@ -1,1 +1,10 @@
-/* Placeholder to avoid 404; Tailwind via CDN handles styles */
+/* Global overrides and utility hooks for Tailwind-loaded app */
+/* This file intentionally minimal to satisfy index.html link and allow custom styles if needed. */
+
+/* Example: smooth fonts */
+html, body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* You can add custom utility classes here as needed. */

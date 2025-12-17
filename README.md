@@ -8,16 +8,20 @@ This contains everything you need to run your app locally.
 
 View your app in AI Studio: https://ai.studio/apps/drive/10ue5-uU4W1KhGbUEf_eS-OekJJO7Cd7K
 
-## Run Locally
+## Executar Localmente
 
-**Prerequisites:**  Node.js
+- Pré-requisitos: Node.js 18+
 
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+1. Instalar dependências:
+   ```bash
+   npm install
+   ```
+2. Configurar variáveis de ambiente:
+   - Copie `.env.example` para `.env` e edite `GEMINI_API_KEY`.
+3. Rodar o app (Vite):
+   ```bash
+   npm run dev
+   ```
 
 ## Deploy (Vercel)
 
@@ -40,8 +44,8 @@ View your app in AI Studio: https://ai.studio/apps/drive/10ue5-uU4W1KhGbUEf_eS-O
      ```
 
 Notas importantes:
-- Este projeto é um SPA (Vite). O arquivo `vercel.json` já inclui o fallback de rotas para `index.html`.
-- A chave `GEMINI_API_KEY` definida no Vercel é injetada em build-time nas variáveis do cliente; para maior segurança, considere mover as chamadas de IA para uma API Route (serverless) e não expor a chave no cliente.
+- Este projeto é um SPA (Vite). Caso use `vercel.json`, configure fallback para `index.html`.
+- A chave `GEMINI_API_KEY` não deve ser exposta no cliente. Use a rota serverless `api/ai`.
 
 ## Desenvolvimento com rotas serverless (Vercel CLI)
 
@@ -56,8 +60,13 @@ Para usar a rota `api/ai` localmente, utilize o Vercel CLI:
    ```bash
    vercel env add GEMINI_API_KEY development
    ```
-3. Rode o ambiente de desenvolvimento com funções:
+3. Rodar o ambiente de desenvolvimento com funções:
    ```bash
    npm run dev:vercel
    ```
    Isso simula as Serverless Functions (`api/*`) enquanto você desenvolve.
+
+### Endpoints
+- `POST /api/ai` com `action`:
+  - `generatePersonalizedMessage`: `{ customerName, planName, price, dueDate, daysDiff, type }`
+  - `improveTemplateText`: `{ currentText, context }`

@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { SYSTEM_INSTRUCTION } from './aiPersona';
 
 // Inicializa o cliente Gemini
 // Nota: Em produção, certifique-se de que a variável de ambiente está configurada corretamente no seu build.
@@ -44,7 +45,7 @@ export const generatePersonalizedMessage = async (
         }
 
         const absDays = Math.abs(daysDiff);
-        const systemInstruction = `Você é um assistente virtual profissional de um serviço de IPTV.\nSeu objetivo é escrever mensagens curtas, educadas e diretas para WhatsApp.\nNão use hashtags. Use emojis moderadamente.\nA mensagem deve incluir o nome do cliente, o valor e a ação necessária.`;
+        const systemInstruction = SYSTEM_INSTRUCTION;
 
         let prompt = '';
         if (type === 'payment') {
@@ -88,6 +89,7 @@ export const improveTemplateText = async (currentText: string, context: string):
         const response = await ai.models.generateContent({
             model: modelId,
             contents: `Melhore o seguinte texto para uma mensagem de WhatsApp de serviço de IPTV.\nContexto: ${context}.\nMantenha as variáveis originais (ex: {cliente_nome}, {valor}) intactas.\nTorne o texto mais profissional, engajador e com emojis adequados.\n\nTexto original:\n"${currentText}"`,
+            config: { systemInstruction: SYSTEM_INSTRUCTION, temperature: 0.5, maxOutputTokens: 200 }
         });
 
         return (response as any)?.text || currentText;

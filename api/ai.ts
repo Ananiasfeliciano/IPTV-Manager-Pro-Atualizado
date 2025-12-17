@@ -1,59 +1,67 @@
 import { GoogleGenAI } from "@google/genai";
+import { SYSTEM_INSTRUCTION } from "../services/aiPersona";
 
-const modelId = "gemini-2.5-flash";
-
+// Lightweight Vercel Serverless Function for AI actions
 export default async function handler(req: any, res: any) {
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed" });
-    return;
-  }
-
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey || apiKey === "PLACEHOLDER_API_KEY") {
-      res.status(400).json({ error: "GEMINI_API_KEY ausente nas variáveis de ambiente do projeto (Vercel)." });
+    const method = req.method || "GET";
+    if (method !== "POST") {
+      res.statusCode = 405;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Method Not Allowed" }));
+      return;
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
+    if (!apiKey) {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Missing GEMINI_API_KEY environment variable" }));
       return;
     }
 
     const ai = new GoogleGenAI({ apiKey });
 
-    const isStringBody = typeof req.body === "string";
-    const body = isStringBody ? JSON.parse(req.body) : req.body || {};
-    const { action } = body || {};
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve) => {
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => resolve());
+    });
+
+    const bodyStr = Buffer.concat(chunks).toString("utf8");
+    const body = bodyStr ? JSON.parse(bodyStr) : {};
+    const { action } = body;
+
+    if (!action) {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Missing 'action' in request body" }));
+      return;
+    }
+
+    const model = "gemini-2.5-flash";
 
     if (action === "generatePersonalizedMessage") {
       const { customerName, planName, price, dueDate, daysDiff, type } = body;
 
-      const absDays = Math.abs(daysDiff || 0);
-      const systemInstruction = `Você é um assistente virtual profissional de um serviço de IPTV. 
-Seu objetivo é escrever mensagens curtas, educadas e diretas para WhatsApp. 
-Não use hashtags. Use emojis moderadamente. 
-A mensagem deve incluir o nome do cliente, o valor e a ação necessária.`;
+      const absDays = Math.abs(Number(daysDiff) || 0);
+      const systemInstruction = SYSTEM_INSTRUCTION;
 
-      let prompt = "";
-      if (type === "payment") {
-        prompt = `Escreva uma mensagem de cobrança para o cliente ${customerName}. 
-O plano ${planName} no valor de R$ ${Number(price || 0).toFixed(2)} venceu em ${dueDate} (atrasado há ${absDays} dias).
-Seja firme mas educado. Peça para enviar o comprovante do PIX para liberar o sinal.`;
-      } else {
-        prompt = `Escreva um lembrete amigável para o cliente ${customerName}.
-O plano ${planName} vence em breve, no dia ${dueDate} (daqui a ${absDays} dias).
-Valor: R$ ${Number(price || 0).toFixed(2)}.
-Pergunte se ele deseja a chave PIX para renovar antecipadamente e evitar bloqueio.`;
-      }
+      const prompt =
+        type === "payment"
+          ? `Escreva uma mensagem de cobrança para o cliente ${customerName}.\nO plano ${planName} no valor de R$ ${Number(price).toFixed(2)} venceu em ${dueDate} (atrasado há ${absDays} dias).\nSeja firme mas educado. Peça para enviar o comprovante do PIX para liberar o sinal.`
+          : `Escreva um lembrete amigável para o cliente ${customerName}.\nO plano ${planName} vence em breve, no dia ${dueDate} (daqui a ${absDays} dias).\nValor: R$ ${Number(price).toFixed(2)}.\nPergunte se ele deseja a chave PIX para renovar antecipadamente e evitar bloqueio.`;
 
       const response = await ai.models.generateContent({
-        model: modelId,
+        model,
         contents: prompt,
-        config: {
-          systemInstruction,
-          temperature: 0.7,
-          maxOutputTokens: 200,
-        },
+        config: { systemInstruction, temperature: 0.7, maxOutputTokens: 200 },
       });
 
       const text = (response as any)?.text || "";
-      res.status(200).json({ text });
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ text }));
       return;
     }
 
@@ -61,17 +69,25 @@ Pergunte se ele deseja a chave PIX para renovar antecipadamente e evitar bloquei
       const { currentText, context } = body;
 
       const response = await ai.models.generateContent({
-        model: modelId,
+        model,
         contents: `Melhore o seguinte texto para uma mensagem de WhatsApp de serviço de IPTV.\nContexto: ${context}.\nMantenha as variáveis originais (ex: {cliente_nome}, {valor}) intactas.\nTorne o texto mais profissional, engajador e com emojis adequados.\n\nTexto original:\n"${currentText}"`,
+        config: { systemInstruction: SYSTEM_INSTRUCTION, temperature: 0.5, maxOutputTokens: 200 },
       });
 
       const text = (response as any)?.text || currentText || "";
-      res.status(200).json({ text });
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ text }));
       return;
     }
 
-    res.status(400).json({ error: "Ação inválida" });
-  } catch (err: any) {
-    res.status(500).json({ error: err?.message || "Erro interno" });
+    res.statusCode = 400;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: `Unknown action: ${action}` }));
+  } catch (error: any) {
+    console.error("/api/ai error:", error);
+    res.statusCode = 500;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Internal Server Error" }));
   }
 }

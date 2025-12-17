@@ -6,17 +6,21 @@
   "scripts": {
     "dev": "vite",
     "dev:vercel": "vercel dev",
+    "dev:api": "node dev-api.js",
+    "dev:all": "concurrently -n api,web -c green,cyan \"node dev-api.js\" \"npm run dev\"",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@google/genai": "^1.33.0",
+    "dotenv": "^17.2.3",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "@google/genai": "^1.33.0"
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.2.1",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }
