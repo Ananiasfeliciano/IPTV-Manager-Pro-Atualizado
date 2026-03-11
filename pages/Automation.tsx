@@ -337,7 +337,7 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
         addLog('SUCCESS', 'Disparo em massa finalizado!');
     };
 
-    return (
+    return (<>
         <div className="space-y-6 animate-fadeIn">
             {/* Header Section */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -406,7 +406,7 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
 
                         <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-lg flex-1 flex flex-col overflow-hidden">
                             <div className="p-4 border-b border-slate-700 bg-slate-800/50 flex flex-wrap gap-2">
-                                {Object.values(templates).map((tpl) => (
+                                {(Object.values(templates) as MessageTemplate[]).map((tpl) => (
                                     <button
                                         key={tpl.type}
                                         onClick={() => setActiveTab(tpl.type)}
@@ -669,5 +669,5 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
             )}
         </div>
         {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-    );
+    </>);
 };

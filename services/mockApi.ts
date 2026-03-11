@@ -1,9 +1,6 @@
 import { IptvData, Customer, Server, Plan, Subscription, SubscriptionStatus, DashboardStats, ActivityItem } from '../types';
 import * as db from './db';
 
-// Helper function to simulate network latency
-const simulateNetwork = (delay = 300) => new Promise(res => setTimeout(res, delay));
-
 // Helper function to update statuses based on the current date
 const checkAndUpdateStatuses = async (subscriptions: Subscription[]): Promise<Subscription[]> => {
   const today = new Date();
@@ -47,8 +44,6 @@ const checkAndUpdateStatuses = async (subscriptions: Subscription[]): Promise<Su
 
 // --- Optimized Dashboard Fetch ---
 export const fetchDashboardStats = async (): Promise<DashboardStats> => {
-    await simulateNetwork(200); // Shorter delay for dashboard
-    
     // Perform Health Check
     const dbStatus = await db.checkConnection();
 
@@ -75,7 +70,7 @@ export const fetchDashboardStats = async (): Promise<DashboardStats> => {
         db.dbCount('subscriptions', 'status', SubscriptionStatus.TRUST),
         db.dbCount('subscriptions', 'status', SubscriptionStatus.OVERDUE),
         // Get expiring soon (Range: Today -> Today + 7 days) on 'endDate' index
-        db.dbGetRange<Subscription>('subscriptions', 'endDate', IDBKeyRange.bound(today.toISOString(), nextWeek.toISOString())),
+        db.dbGetRange<Subscription>('subscriptions', 'endDate', today.toISOString(), nextWeek.toISOString()),
         // Get recent activities
         db.dbGetRecent<Subscription>('subscriptions', 'startDate', 5),
         db.dbGetRecent<Customer>('customers', 'createdAt', 5),
@@ -120,7 +115,6 @@ export const fetchDashboardStats = async (): Promise<DashboardStats> => {
 // --- Standard API Functions ---
 
 export const fetchAllData = async (): Promise<IptvData> => {
-  await simulateNetwork();
   
   const customers = await db.dbGetAll<Customer>('customers');
   const servers = await db.dbGetAll<Server>('servers');
@@ -140,7 +134,6 @@ export const fetchAllData = async (): Promise<IptvData> => {
 
 // --- Customer API ---
 export const addCustomer = async (customerData: Omit<Customer, 'id' | 'createdAt'>): Promise<Customer> => {
-  await simulateNetwork();
   const newCustomer: Customer = { 
     ...customerData, 
     id: `c${Date.now()}`,
@@ -150,12 +143,10 @@ export const addCustomer = async (customerData: Omit<Customer, 'id' | 'createdAt
 };
 
 export const updateCustomer = async (customerData: Customer): Promise<Customer> => {
-  await simulateNetwork();
   return db.dbUpdate('customers', customerData);
 };
 
 export const deleteCustomer = async (customerId: string): Promise<{ id: string }> => {
-  await simulateNetwork();
   
   // Also remove subscriptions for this customer
   const allSubs = await db.dbGetAll<Subscription>('subscriptions');
@@ -171,25 +162,21 @@ export const deleteCustomer = async (customerId: string): Promise<{ id: string }
 
 // --- Subscription API ---
 export const addSubscription = async (subData: Omit<Subscription, 'id'>): Promise<Subscription> => {
-  await simulateNetwork();
   const newSubscription: Subscription = { ...subData, id: `sub${Date.now()}` };
   return db.dbAdd('subscriptions', newSubscription);
 };
 
 export const updateSubscription = async (subData: Subscription): Promise<Subscription> => {
-  await simulateNetwork();
   return db.dbUpdate('subscriptions', subData);
 };
 
 export const deleteSubscription = async (subscriptionId: string): Promise<{ id: string }> => {
-  await simulateNetwork();
   await db.dbDelete('subscriptions', subscriptionId);
   return { id: subscriptionId };
 };
 
 // Renew subscription logic
 export const renewSubscription = async (subscriptionId: string, type: 'PAYMENT' | 'TRUST', paymentMethod?: string): Promise<Subscription> => {
-    await simulateNetwork();
     const subscription = await db.dbGetById<Subscription>('subscriptions', subscriptionId);
     if (!subscription) throw new Error("Subscription not found");
 
@@ -229,18 +216,15 @@ export const renewSubscription = async (subscriptionId: string, type: 'PAYMENT' 
 
 // --- Server API ---
 export const addServer = async (serverData: Omit<Server, 'id'>): Promise<Server> => {
-  await simulateNetwork();
   const newServer: Server = { ...serverData, id: `s${Date.now()}` };
   return db.dbAdd('servers', newServer);
 };
 
 export const updateServer = async (serverData: Server): Promise<Server> => {
-  await simulateNetwork();
   return db.dbUpdate('servers', serverData);
 };
 
 export const deleteServer = async (serverId: string): Promise<{ id: string }> => {
-  await simulateNetwork();
   
   // Find all associated subscriptions and cancel them instead of deleting
   const allSubs = await db.dbGetAll<Subscription>('subscriptions');
@@ -257,18 +241,15 @@ export const deleteServer = async (serverId: string): Promise<{ id: string }> =>
 
 // --- Plan API ---
 export const addPlan = async (planData: Omit<Plan, 'id'>): Promise<Plan> => {
-  await simulateNetwork();
   const newPlan: Plan = { ...planData, id: `p${Date.now()}` };
   return db.dbAdd('plans', newPlan);
 };
 
 export const updatePlan = async (planData: Plan): Promise<Plan> => {
-  await simulateNetwork();
   return db.dbUpdate('plans', planData);
 };
 
 export const deletePlan = async (planId: string): Promise<{ id: string }> => {
-  await simulateNetwork();
   
   // Cancel subscriptions associated with this plan
   const allSubs = await db.dbGetAll<Subscription>('subscriptions');
