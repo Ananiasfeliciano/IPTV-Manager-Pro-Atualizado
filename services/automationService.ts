@@ -1,4 +1,9 @@
 import { supabase } from './supabaseClient';
+import {
+  EvolutionConfig,
+  sendTextMessage as evoSendText,
+  isConfigured as evoIsConfigured,
+} from './evolutionApi';
 
 // ========================================================
 // Tipos
@@ -9,6 +14,10 @@ export interface AutomationSettings {
   pixName: string;
   autoSendOverdue: boolean;
   autoSendWelcome: boolean;
+  // Evolution API
+  evoApiUrl: string;
+  evoApiKey: string;
+  evoInstanceName: string;
 }
 
 export interface MessageHistoryEntry {
@@ -36,7 +45,7 @@ export function validateBRPhone(phone: string): { valid: boolean; formatted: str
 }
 
 // ========================================================
-// Abrir WhatsApp via wa.me
+// Abrir WhatsApp via wa.me (fallback)
 // ========================================================
 
 export function openWhatsApp(phone: string, message: string): boolean {
@@ -49,6 +58,51 @@ export function openWhatsApp(phone: string, message: string): boolean {
 }
 
 // ========================================================
+// Envio unificado: Evolution API se conectado, senão wa.me
+// ========================================================
+
+export async function sendMessage(
+  phone: string,
+  message: string,
+  settings: AutomationSettings,
+  useApi: boolean
+): Promise<{ sent: boolean; method: 'api' | 'wame'; error?: string }> {
+  const { valid } = validateBRPhone(phone);
+  if (!valid) return { sent: false, method: 'wame', error: 'Telefone inválido' };
+
+  const evoConfig: EvolutionConfig = {
+    apiUrl: settings.evoApiUrl,
+    apiKey: settings.evoApiKey,
+    instanceName: settings.evoInstanceName,
+  };
+
+  // Try Evolution API if configured and connected
+  if (useApi && evoIsConfigured(evoConfig)) {
+    const result = await evoSendText(evoConfig, phone, message);
+    if (result.sent) {
+      return { sent: true, method: 'api' };
+    }
+    return { sent: false, method: 'api', error: result.error };
+  }
+
+  // Fallback: wa.me link
+  const ok = openWhatsApp(phone, message);
+  return { sent: ok, method: 'wame' };
+}
+
+// ========================================================
+// Helpers para Evolution Config
+// ========================================================
+
+export function getEvolutionConfig(settings: AutomationSettings): EvolutionConfig {
+  return {
+    apiUrl: settings.evoApiUrl,
+    apiKey: settings.evoApiKey,
+    instanceName: settings.evoInstanceName,
+  };
+}
+
+// ========================================================
 // Settings CRUD (Supabase)
 // ========================================================
 
@@ -57,6 +111,9 @@ const DEFAULT_SETTINGS: AutomationSettings = {
   pixName: '',
   autoSendOverdue: true,
   autoSendWelcome: false,
+  evoApiUrl: '',
+  evoApiKey: '',
+  evoInstanceName: 'iptv-manager',
 };
 
 export async function getSettings(): Promise<AutomationSettings> {
@@ -68,7 +125,6 @@ export async function getSettings(): Promise<AutomationSettings> {
       .maybeSingle();
 
     if (error || !data) {
-      // Fallback: try localStorage migration
       const pixKey = localStorage.getItem('iptv_pix_key') || '';
       const pixName = localStorage.getItem('iptv_pix_name') || '';
       return { ...DEFAULT_SETTINGS, pixKey, pixName };
@@ -79,6 +135,9 @@ export async function getSettings(): Promise<AutomationSettings> {
       pixName: data.pix_name || '',
       autoSendOverdue: data.auto_send_overdue ?? true,
       autoSendWelcome: data.auto_send_welcome ?? false,
+      evoApiUrl: data.evo_api_url || '',
+      evoApiKey: data.evo_api_key || '',
+      evoInstanceName: data.evo_instance_name || 'iptv-manager',
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -91,12 +150,14 @@ export async function saveSettings(settings: Partial<AutomationSettings>): Promi
   if (settings.pixName !== undefined) mapped.pix_name = settings.pixName;
   if (settings.autoSendOverdue !== undefined) mapped.auto_send_overdue = settings.autoSendOverdue;
   if (settings.autoSendWelcome !== undefined) mapped.auto_send_welcome = settings.autoSendWelcome;
+  if (settings.evoApiUrl !== undefined) mapped.evo_api_url = settings.evoApiUrl;
+  if (settings.evoApiKey !== undefined) mapped.evo_api_key = settings.evoApiKey;
+  if (settings.evoInstanceName !== undefined) mapped.evo_instance_name = settings.evoInstanceName;
 
   await supabase
     .from('automation_settings')
     .upsert({ id: 'default', ...mapped });
 
-  // Keep localStorage in sync for legacy access
   if (settings.pixKey !== undefined) localStorage.setItem('iptv_pix_key', settings.pixKey);
   if (settings.pixName !== undefined) localStorage.setItem('iptv_pix_name', settings.pixName);
 }

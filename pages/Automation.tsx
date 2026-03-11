@@ -6,13 +6,22 @@ import {
     AutomationSettings,
     MessageHistoryEntry,
     validateBRPhone,
-    openWhatsApp,
+    sendMessage,
     getSettings,
     saveSettings,
     recordMessage,
     getRecentMessages,
     getTodayMessageIds,
+    getEvolutionConfig,
 } from '../services/automationService';
+import {
+    createInstance,
+    fetchQrCode,
+    getConnectionState,
+    logoutInstance,
+    isConfigured as evoIsConfigured,
+    EvolutionConfig,
+} from '../services/evolutionApi';
 import { Toast } from '../components/Toast';
 
 // Tipos para os templates
@@ -90,6 +99,9 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
     // Connection State
     const [isConnected, setIsConnected] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
+    const [qrCodeBase64, setQrCodeBase64] = useState<string | null>(null);
+    const [connectionError, setConnectionError] = useState<string | null>(null);
+    const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
     
     // Config State
     const [templates, setTemplates] = useState<Record<TemplateType, MessageTemplate>>(DEFAULT_TEMPLATES);
@@ -98,8 +110,10 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
     // Automation Settings (from Supabase)
     const [settings, setSettings] = useState<AutomationSettings>({
         pixKey: '', pixName: '', autoSendOverdue: true, autoSendWelcome: false,
+        evoApiUrl: '', evoApiKey: '', evoInstanceName: 'iptv-manager',
     });
     const [settingsLoaded, setSettingsLoaded] = useState(false);
+    const [showApiConfig, setShowApiConfig] = useState(false);
     
     // Message History
     const [messageHistory, setMessageHistory] = useState<MessageHistoryEntry[]>([]);
@@ -122,8 +136,23 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
             const s = await getSettings();
             setSettings(s);
             setSettingsLoaded(true);
+            // Check if already connected
+            const cfg = getEvolutionConfig(s);
+            if (evoIsConfigured(cfg)) {
+                const state = await getConnectionState(cfg);
+                if (state?.state === 'open') {
+                    setIsConnected(true);
+                }
+            }
         };
         loadSettings();
+    }, []);
+
+    // Cleanup polling on unmount
+    useEffect(() => {
+        return () => {
+            if (pollingRef.current) clearInterval(pollingRef.current);
+        };
     }, []);
 
     // Load today's sent message IDs
@@ -176,24 +205,96 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
         }
     };
 
-    const handleConnect = () => {
-        setIsConnecting(true);
-        addLog('INFO', 'Ativando modo de envio via WhatsApp Web (wa.me)...');
-        // Validate settings before connecting
-        if (!settings.pixKey) {
-            addLog('WARN', 'Chave PIX não configurada. Configure nas Configurações Rápidas.');
+    const handleConnect = async () => {
+        const evoConfig = getEvolutionConfig(settings);
+
+        if (!evoIsConfigured(evoConfig)) {
+            setShowApiConfig(true);
+            addLog('WARN', 'Configure a Evolution API antes de conectar.');
+            setToast({ message: 'Configure a URL e API Key da Evolution API primeiro.', type: 'error' });
+            return;
         }
-        setTimeout(() => {
+
+        setIsConnecting(true);
+        setConnectionError(null);
+        setQrCodeBase64(null);
+        addLog('INFO', 'Criando instância na Evolution API...');
+
+        // 1. Create instance
+        const createResult = await createInstance(evoConfig);
+        if (!createResult.created) {
             setIsConnecting(false);
-            setIsConnected(true);
-            addLog('SUCCESS', 'Bot ativado! Envios via wa.me habilitados.');
-            addLog('INFO', `Fila atual: ${collectionQueue.length} clientes pendentes.`);
-        }, 1500);
+            setConnectionError(createResult.error || 'Falha ao criar instância.');
+            addLog('ERROR', `Erro ao criar instância: ${createResult.error}`);
+            setToast({ message: createResult.error || 'Falha ao criar instância.', type: 'error' });
+            return;
+        }
+
+        addLog('SUCCESS', 'Instância criada. Gerando QR Code...');
+
+        // 2. Fetch QR Code
+        const qrResult = await fetchQrCode(evoConfig);
+        if (!qrResult.qr?.base64) {
+            // Check if maybe already connected
+            const state = await getConnectionState(evoConfig);
+            if (state?.state === 'open') {
+                setIsConnecting(false);
+                setIsConnected(true);
+                addLog('SUCCESS', 'WhatsApp já está conectado!');
+                setToast({ message: 'WhatsApp conectado!', type: 'success' });
+                return;
+            }
+            setIsConnecting(false);
+            setConnectionError(qrResult.error || 'QR Code não retornado.');
+            addLog('ERROR', `Erro ao obter QR Code: ${qrResult.error}`);
+            return;
+        }
+
+        setQrCodeBase64(qrResult.qr.base64);
+        setIsConnecting(false);
+        addLog('INFO', 'QR Code gerado! Escaneie com seu WhatsApp.');
+
+        // 3. Start polling connection state
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        pollingRef.current = setInterval(async () => {
+            const state = await getConnectionState(evoConfig);
+            if (state?.state === 'open') {
+                setIsConnected(true);
+                setQrCodeBase64(null);
+                setConnectionError(null);
+                addLog('SUCCESS', 'WhatsApp conectado com sucesso!');
+                setToast({ message: 'WhatsApp conectado!', type: 'success' });
+                if (pollingRef.current) clearInterval(pollingRef.current);
+                pollingRef.current = null;
+            }
+        }, 5000);
+
+        // Stop polling after 2 minutes
+        setTimeout(() => {
+            if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+                if (!isConnected) {
+                    setQrCodeBase64(null);
+                    addLog('WARN', 'Tempo expirado. Tente gerar o QR Code novamente.');
+                }
+            }
+        }, 120000);
     };
 
-    const handleDisconnect = () => {
+    const handleDisconnect = async () => {
+        const evoConfig = getEvolutionConfig(settings);
+        if (evoIsConfigured(evoConfig)) {
+            addLog('INFO', 'Desconectando do WhatsApp...');
+            await logoutInstance(evoConfig);
+        }
+        if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+        }
         setIsConnected(false);
-        addLog('WARN', 'Bot desativado.');
+        setQrCodeBase64(null);
+        addLog('WARN', 'Desconectado do WhatsApp.');
     };
 
     // Settings handlers
@@ -289,18 +390,19 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                 return;
             }
 
-            const sent = openWhatsApp(customer.phone, finalMessage);
+            const result = await sendMessage(customer.phone, finalMessage, settings, isConnected);
             await recordMessage({
                 customerId: customer.id,
                 subscriptionId: sub.id,
                 messageType: 'ai_' + type,
                 phone: customer.phone,
                 messagePreview: finalMessage,
-                status: sent ? 'sent' : 'failed',
+                status: result.sent ? 'sent' : 'failed',
             });
             setSentTodayIds(prev => new Set(prev).add(sub.id));
-            addLog('SUCCESS', `Mensagem IA enviada para ${customer.name}`);
-            setToast({ message: `Mensagem IA gerada para ${customer.name}.`, type: 'success' });
+            const methodLabel = result.method === 'api' ? '(via API)' : '(via wa.me)';
+            addLog('SUCCESS', `Mensagem IA enviada para ${customer.name} ${methodLabel}`);
+            setToast({ message: `Mensagem IA gerada para ${customer.name} ${methodLabel}.`, type: 'success' });
         } else {
             addLog('ERROR', 'Falha ao gerar mensagem com IA. Tente o envio padrão.');
             setToast({ message: 'Falha na IA. Verifique GEMINI_API_KEY no servidor.', type: 'error' });
@@ -356,7 +458,7 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
             return false;
         }
 
-        const sent = openWhatsApp(customer.phone, message);
+        const result = await sendMessage(customer.phone, message, settings, isConnected);
         
         await recordMessage({
             customerId: customer.id,
@@ -364,17 +466,18 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
             messageType: type,
             phone: customer.phone,
             messagePreview: message,
-            status: sent ? 'sent' : 'failed',
+            status: result.sent ? 'sent' : 'failed',
         });
         
         setSentTodayIds(prev => new Set(prev).add(sub.id));
         
+        const methodLabel = result.method === 'api' ? '(API)' : '(wa.me)';
         const logMsg = type === 'reminder' 
-            ? `Lembrete enviado para ${customer.name}`
-            : `Cobrança PIX enviada para ${customer.name}`;
+            ? `Lembrete enviado para ${customer.name} ${methodLabel}`
+            : `Cobrança PIX enviada para ${customer.name} ${methodLabel}`;
             
-        addLog(sent ? 'SUCCESS' : 'ERROR', sent ? logMsg : `Falha ao enviar para ${customer.name}`);
-        return sent;
+        addLog(result.sent ? 'SUCCESS' : 'ERROR', result.sent ? logMsg : `Falha ao enviar para ${customer.name}: ${result.error || 'erro desconhecido'}`);
+        return result.sent;
     };
 
     const handleBatchAutoSend = async () => {
@@ -391,7 +494,7 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
             return;
         }
 
-        if (!window.confirm(`Enviar mensagens para ${pending.length} clientes?\n\nIsso abrirá abas do WhatsApp. Certifique-se de que os POP-UPS estão PERMITIDOS.\n\nDeseja continuar?`)) {
+        if (!window.confirm(`Enviar mensagens para ${pending.length} clientes${isConnected ? ' via API WhatsApp' : ' via wa.me (abas)'}?\n\n${!isConnected ? 'Certifique-se de que os POP-UPS estão PERMITIDOS.\n\n' : ''}Deseja continuar?`)) {
             return;
         }
 
@@ -471,9 +574,9 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                     </div>
 
                     <div className="flex items-center bg-slate-800 p-2 rounded-lg border border-slate-700">
-                        <div className={`w-3 h-3 rounded-full mr-3 ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-                        <span className={`font-semibold mr-4 ${isConnected ? 'text-green-400' : 'text-slate-400'} hidden sm:inline`}>
-                            {isConnected ? 'ONLINE' : 'OFFLINE'}
+                        <div className={`w-3 h-3 rounded-full mr-3 ${isConnected ? 'bg-green-500 animate-pulse' : qrCodeBase64 ? 'bg-yellow-500 animate-pulse' : 'bg-red-500'}`}></div>
+                        <span className={`font-semibold mr-4 ${isConnected ? 'text-green-400' : qrCodeBase64 ? 'text-yellow-400' : 'text-slate-400'} hidden sm:inline`}>
+                            {isConnected ? 'CONECTADO' : qrCodeBase64 ? 'ESCANEIE' : 'OFFLINE'}
                         </span>
                         {isConnected ? (
                             <button onClick={handleDisconnect} className="bg-red-500/10 hover:bg-red-500/20 text-red-400 px-3 py-1 rounded text-sm transition-colors border border-red-500/30">
@@ -481,7 +584,7 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                             </button>
                         ) : (
                             <button onClick={handleConnect} disabled={isConnecting} className="bg-green-500/10 hover:bg-green-500/20 text-green-400 px-3 py-1 rounded text-sm transition-colors border border-green-500/30 flex items-center">
-                            {isConnecting ? 'Conectando...' : 'Conectar Bot'}
+                            {isConnecting ? 'Conectando...' : 'Conectar WhatsApp'}
                             </button>
                         )}
                     </div>
@@ -492,18 +595,91 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                 // --- SETTINGS VIEW ---
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-200px)] min-h-[600px]">
                     <div className="lg:col-span-8 flex flex-col gap-6">
-                        {!isConnected && !isConnecting && (
-                            <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 shadow-lg flex flex-col md:flex-row items-center gap-6 animate-fadeInUp">
-                                <div className="bg-white p-3 rounded-lg flex-shrink-0">
-                                    <Icon name="qr-code" className="w-32 h-32 text-slate-900" />
-                                </div>
-                                <div>
-                                    <h3 className="text-xl font-bold text-white mb-2">Conecte seu WhatsApp</h3>
-                                    <p className="text-slate-400 mb-4">Escaneie o QR Code para permitir o envio automático.</p>
-                                    <button onClick={handleConnect} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg shadow-indigo-600/20 transition-all">
-                                        Gerar QR Code
-                                    </button>
-                                </div>
+                        {!isConnected && (
+                            <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 shadow-lg animate-fadeInUp">
+                                {qrCodeBase64 ? (
+                                    /* Real QR Code from Evolution API */
+                                    <div className="flex flex-col md:flex-row items-center gap-6">
+                                        <div className="bg-white p-2 rounded-lg flex-shrink-0">
+                                            <img src={qrCodeBase64} alt="QR Code WhatsApp" className="w-48 h-48" />
+                                        </div>
+                                        <div>
+                                            <h3 className="text-xl font-bold text-white mb-2">Escaneie o QR Code</h3>
+                                            <p className="text-slate-400 mb-2">Abra o WhatsApp no seu celular &gt; <strong>Dispositivos Conectados</strong> &gt; <strong>Conectar Dispositivo</strong></p>
+                                            <div className="flex items-center text-yellow-400 text-sm mb-4">
+                                                <div className="w-3 h-3 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin mr-2"></div>
+                                                Aguardando leitura do QR Code...
+                                            </div>
+                                            <button onClick={handleConnect} className="text-xs text-slate-400 hover:text-white underline">
+                                                Gerar novo QR Code
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    /* Connection panel */
+                                    <div className="flex flex-col md:flex-row items-center gap-6">
+                                        <div className="bg-white p-3 rounded-lg flex-shrink-0">
+                                            <Icon name="qr-code" className="w-32 h-32 text-slate-900" />
+                                        </div>
+                                        <div>
+                                            <h3 className="text-xl font-bold text-white mb-2">Conecte seu WhatsApp</h3>
+                                            <p className="text-slate-400 mb-3">Conecte via <strong>Evolution API</strong> para enviar mensagens diretamente, sem abrir abas.</p>
+                                            {connectionError && (
+                                                <p className="text-red-400 text-sm mb-3 bg-red-500/10 px-3 py-2 rounded border border-red-500/20">{connectionError}</p>
+                                            )}
+                                            <div className="flex items-center gap-3">
+                                                <button 
+                                                    onClick={handleConnect} 
+                                                    disabled={isConnecting}
+                                                    className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg shadow-indigo-600/20 transition-all disabled:opacity-50"
+                                                >
+                                                    {isConnecting ? 'Conectando...' : 'Gerar QR Code'}
+                                                </button>
+                                                <button 
+                                                    onClick={() => setShowApiConfig(!showApiConfig)}
+                                                    className="text-sm text-indigo-400 hover:text-indigo-300 underline"
+                                                >
+                                                    {showApiConfig ? 'Ocultar Config' : 'Configurar API'}
+                                                </button>
+                                            </div>
+                                            {showApiConfig && (
+                                                <div className="mt-4 p-4 bg-slate-900 rounded-lg border border-slate-700 space-y-3">
+                                                    <p className="text-xs text-slate-500 mb-2">Configure sua <a href="https://doc.evolution-api.com" target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline">Evolution API</a>:</p>
+                                                    <div>
+                                                        <label className="text-xs text-slate-400 block mb-1">URL da API</label>
+                                                        <input 
+                                                            type="text" placeholder="https://api.seusite.com"
+                                                            className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                                                            value={settings.evoApiUrl}
+                                                            onChange={(e) => setSettings(prev => ({ ...prev, evoApiUrl: e.target.value }))}
+                                                            onBlur={(e) => handleSettingsChange('evoApiUrl', e.target.value)}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs text-slate-400 block mb-1">API Key (Global)</label>
+                                                        <input 
+                                                            type="password" placeholder="Sua API Key"
+                                                            className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                                                            value={settings.evoApiKey}
+                                                            onChange={(e) => setSettings(prev => ({ ...prev, evoApiKey: e.target.value }))}
+                                                            onBlur={(e) => handleSettingsChange('evoApiKey', e.target.value)}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-xs text-slate-400 block mb-1">Nome da Instância</label>
+                                                        <input 
+                                                            type="text" placeholder="iptv-manager"
+                                                            className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                                                            value={settings.evoInstanceName}
+                                                            onChange={(e) => setSettings(prev => ({ ...prev, evoInstanceName: e.target.value }))}
+                                                            onBlur={(e) => handleSettingsChange('evoInstanceName', e.target.value)}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 

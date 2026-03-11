@@ -102,14 +102,17 @@ CREATE TABLE IF NOT EXISTS automation_settings (
     pix_name TEXT DEFAULT '',
     auto_send_overdue BOOLEAN DEFAULT true,
     auto_send_welcome BOOLEAN DEFAULT false,
+    evo_api_url TEXT DEFAULT '',
+    evo_api_key TEXT DEFAULT '',
+    evo_instance_name TEXT DEFAULT 'iptv-manager',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE automation_settings ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow all on automation_settings" ON automation_settings FOR ALL USING (true) WITH CHECK (true);
 
-INSERT INTO automation_settings (id, pix_key, pix_name, auto_send_overdue, auto_send_welcome)
-VALUES ('default', '', '', true, false)
+INSERT INTO automation_settings (id, pix_key, pix_name, auto_send_overdue, auto_send_welcome, evo_api_url, evo_api_key, evo_instance_name)
+VALUES ('default', '', '', true, false, '', '', 'iptv-manager')
 ON CONFLICT (id) DO NOTHING;
 
 -- =====================================================
