@@ -1,7 +1,18 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Icon } from '../components/Icon';
 import { IptvData, Subscription, SubscriptionStatus } from '../types';
 import { generatePersonalizedMessage, improveTemplateText } from '../services/aiService';
+import {
+    AutomationSettings,
+    MessageHistoryEntry,
+    validateBRPhone,
+    openWhatsApp,
+    getSettings,
+    saveSettings,
+    recordMessage,
+    getRecentMessages,
+    getTodayMessageIds,
+} from '../services/automationService';
 import { Toast } from '../components/Toast';
 
 // Tipos para os templates
@@ -74,7 +85,7 @@ const ToggleSwitch: React.FC<{ enabled: boolean; onChange: (enabled: boolean) =>
 };
 
 export const Automation: React.FC<AutomationProps> = ({ data }) => {
-    const [viewMode, setViewMode] = useState<'settings' | 'collections'>('settings');
+    const [viewMode, setViewMode] = useState<'settings' | 'collections' | 'history'>('settings');
 
     // Connection State
     const [isConnected, setIsConnected] = useState(false);
@@ -84,9 +95,20 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
     const [templates, setTemplates] = useState<Record<TemplateType, MessageTemplate>>(DEFAULT_TEMPLATES);
     const [activeTab, setActiveTab] = useState<TemplateType>('welcome');
     
+    // Automation Settings (from Supabase)
+    const [settings, setSettings] = useState<AutomationSettings>({
+        pixKey: '', pixName: '', autoSendOverdue: true, autoSendWelcome: false,
+    });
+    const [settingsLoaded, setSettingsLoaded] = useState(false);
+    
+    // Message History
+    const [messageHistory, setMessageHistory] = useState<MessageHistoryEntry[]>([]);
+    const [sentTodayIds, setSentTodayIds] = useState<Set<string>>(new Set());
+    
     // Loading States for AI
-    const [loadingAi, setLoadingAi] = useState<string | null>(null); // ID or 'template'
+    const [loadingAi, setLoadingAi] = useState<string | null>(null);
     const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+    const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, sent: 0, failed: 0 });
     
     // Logs
     const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -94,17 +116,35 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
     const [healthInfo, setHealthInfo] = useState<string | null>(null);
 
-    // Load from LocalStorage
+    // Load settings from Supabase on mount
+    useEffect(() => {
+        const loadSettings = async () => {
+            const s = await getSettings();
+            setSettings(s);
+            setSettingsLoaded(true);
+        };
+        loadSettings();
+    }, []);
+
+    // Load today's sent message IDs
+    useEffect(() => {
+        const loadSentIds = async () => {
+            const ids = await getTodayMessageIds();
+            setSentTodayIds(ids);
+        };
+        loadSentIds();
+    }, []);
+
+    // Load from LocalStorage (templates only)
     useEffect(() => {
         const savedTemplates = localStorage.getItem('iptv_msg_templates');
         if (savedTemplates) {
-            setTemplates(JSON.parse(savedTemplates));
+            try { setTemplates(JSON.parse(savedTemplates)); } catch { /* ignore */ }
         }
-
         addLog('INFO', 'Sistema de automação inicializado.');
     }, []);
 
-    // Save to LocalStorage whenever templates change
+    // Save templates to LocalStorage whenever they change
     useEffect(() => {
         localStorage.setItem('iptv_msg_templates', JSON.stringify(templates));
     }, [templates]);
@@ -124,8 +164,8 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
             addLog('INFO', 'Verificando ambiente do servidor...');
             const resp = await fetch('/api/health');
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            const data = await resp.json();
-            const info = `status=${data.status}, node=${data.nodeVersion}, region=${data.vercelRegion}, GEMINI_API_KEY=${data.geminiKeySet ? 'OK' : 'FALTANDO'}`;
+            const hdata = await resp.json();
+            const info = `status=${hdata.status}, node=${hdata.nodeVersion}, region=${hdata.vercelRegion}, GEMINI_API_KEY=${hdata.geminiKeySet ? 'OK' : 'FALTANDO'}`;
             setHealthInfo(info);
             setToast({ message: `Servidor OK • ${info}`, type: 'success' });
             addLog('SUCCESS', `Saúde do servidor: ${info}`);
@@ -138,19 +178,29 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
 
     const handleConnect = () => {
         setIsConnecting(true);
-        addLog('INFO', 'Iniciando conexão com WhatsApp Web...');
+        addLog('INFO', 'Ativando modo de envio via WhatsApp Web (wa.me)...');
+        // Validate settings before connecting
+        if (!settings.pixKey) {
+            addLog('WARN', 'Chave PIX não configurada. Configure nas Configurações Rápidas.');
+        }
         setTimeout(() => {
             setIsConnecting(false);
             setIsConnected(true);
-            addLog('SUCCESS', 'Conexão estabelecida com sucesso!');
-            addLog('INFO', 'Bot ativo e aguardando comandos.');
-        }, 2500);
+            addLog('SUCCESS', 'Bot ativado! Envios via wa.me habilitados.');
+            addLog('INFO', `Fila atual: ${collectionQueue.length} clientes pendentes.`);
+        }, 1500);
     };
 
     const handleDisconnect = () => {
         setIsConnected(false);
-        addLog('WARN', 'Desconectado do WhatsApp.');
+        addLog('WARN', 'Bot desativado.');
     };
+
+    // Settings handlers
+    const handleSettingsChange = useCallback(async (key: keyof AutomationSettings, value: string | boolean) => {
+        setSettings(prev => ({ ...prev, [key]: value }));
+        await saveSettings({ [key]: value });
+    }, []);
 
     const handleTemplateChange = (text: string) => {
         setTemplates(prev => ({
@@ -227,17 +277,28 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
         setLoadingAi(null);
 
         if (aiMessage) {
-            // Append PIX info if it's payment
             let finalMessage = aiMessage;
             if (type === 'payment') {
-                 const pixKey = localStorage.getItem('iptv_pix_key') || 'CHAVE-PIX';
-                 const pixName = localStorage.getItem('iptv_pix_name') || 'Nome';
-                 finalMessage += `\n\n🔑 PIX: ${pixKey}\n👤 ${pixName}`;
+                 finalMessage += `\n\n🔑 PIX: ${settings.pixKey || 'CHAVE-PIX'}\n👤 ${settings.pixName || 'Nome'}`;
             }
 
-            const phone = customer.phone.replace(/\D/g, '');
-            const fullPhone = '55' + phone;
-            window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(finalMessage)}`, '_blank');
+            const { valid } = validateBRPhone(customer.phone);
+            if (!valid) {
+                addLog('ERROR', `Telefone inválido para ${customer.name}: ${customer.phone}`);
+                setToast({ message: `Telefone inválido: ${customer.name}`, type: 'error' });
+                return;
+            }
+
+            const sent = openWhatsApp(customer.phone, finalMessage);
+            await recordMessage({
+                customerId: customer.id,
+                subscriptionId: sub.id,
+                messageType: 'ai_' + type,
+                phone: customer.phone,
+                messagePreview: finalMessage,
+                status: sent ? 'sent' : 'failed',
+            });
+            setSentTodayIds(prev => new Set(prev).add(sub.id));
             addLog('SUCCESS', `Mensagem IA enviada para ${customer.name}`);
             setToast({ message: `Mensagem IA gerada para ${customer.name}.`, type: 'success' });
         } else {
@@ -270,10 +331,8 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
         }).filter(item => item.customer && item.plan);
     }, [data]);
 
-    const handleSendMessage = (item: {sub: Subscription, customer: any, plan: any}, type: 'reminder' | 'payment') => {
+    const handleSendMessage = async (item: {sub: Subscription, customer: any, plan: any}, type: 'reminder' | 'payment') => {
         const { sub, customer, plan } = item;
-        const pixKey = localStorage.getItem('iptv_pix_key') || 'CHAVE-PIX-AQUI';
-        const pixName = localStorage.getItem('iptv_pix_name') || 'Nome Beneficiario';
         
         const template = type === 'reminder' ? templates.reminder : templates.payment;
         let message = template.content;
@@ -285,20 +344,37 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
             .replace(/{cliente_nome}/g, customer.name)
             .replace(/{plano_nome}/g, plan.name)
             .replace(/{valor}/g, plan.price.toFixed(2).replace('.', ','))
-            .replace(/{pix_chave}/g, pixKey)
-            .replace(/{pix_nome}/g, pixName)
+            .replace(/{pix_chave}/g, settings.pixKey || 'CHAVE-PIX-AQUI')
+            .replace(/{pix_nome}/g, settings.pixName || 'Nome Beneficiario')
             .replace(/{dias_restantes}/g, daysDiff.toString())
             .replace(/{vencimento}/g, formattedDate);
 
-        const phone = customer.phone.replace(/\D/g, '');
-        const fullPhone = '55' + phone;
-        window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(message)}`, '_blank');
+        const { valid } = validateBRPhone(customer.phone);
+        if (!valid) {
+            addLog('ERROR', `Telefone inválido para ${customer.name}: ${customer.phone}`);
+            setToast({ message: `Telefone inválido: ${customer.name}`, type: 'error' });
+            return false;
+        }
+
+        const sent = openWhatsApp(customer.phone, message);
+        
+        await recordMessage({
+            customerId: customer.id,
+            subscriptionId: sub.id,
+            messageType: type,
+            phone: customer.phone,
+            messagePreview: message,
+            status: sent ? 'sent' : 'failed',
+        });
+        
+        setSentTodayIds(prev => new Set(prev).add(sub.id));
         
         const logMsg = type === 'reminder' 
             ? `Lembrete enviado para ${customer.name}`
             : `Cobrança PIX enviada para ${customer.name}`;
             
-        addLog('SUCCESS', logMsg);
+        addLog(sent ? 'SUCCESS' : 'ERROR', sent ? logMsg : `Falha ao enviar para ${customer.name}`);
+        return sent;
     };
 
     const handleBatchAutoSend = async () => {
@@ -307,35 +383,56 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
             return;
         }
 
-        if (!window.confirm(`Você está prestes a enviar ${collectionQueue.length} mensagens AUTOMATICAMENTE.\n\nIsso abrirá várias abas do WhatsApp. Certifique-se de que os POP-UPS estão PERMITIDOS neste site.\n\nDeseja continuar?`)) {
+        // Filter out already sent today
+        const pending = collectionQueue.filter(item => !sentTodayIds.has(item.sub.id));
+        if (pending.length === 0) {
+            addLog('WARN', 'Todos os clientes da fila já receberam mensagem hoje.');
+            setToast({ message: 'Todos já foram notificados hoje.', type: 'success' });
+            return;
+        }
+
+        if (!window.confirm(`Enviar mensagens para ${pending.length} clientes?\n\nIsso abrirá abas do WhatsApp. Certifique-se de que os POP-UPS estão PERMITIDOS.\n\nDeseja continuar?`)) {
             return;
         }
 
         setIsBatchProcessing(true);
-        addLog('INFO', `Iniciando disparo em massa para ${collectionQueue.length} clientes...`);
+        setBatchProgress({ current: 0, total: pending.length, sent: 0, failed: 0 });
+        addLog('INFO', `Iniciando disparo em massa para ${pending.length} clientes...`);
 
-        // Create a delay helper
         const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+        let sent = 0;
+        let failed = 0;
 
-        for (let i = 0; i < collectionQueue.length; i++) {
-            const item = collectionQueue[i];
+        for (let i = 0; i < pending.length; i++) {
+            const item = pending[i];
             
-            // Lógica Solicitada: Enviar 'Dados de Pagamento (PIX)' para vencidos OU vencendo em até 3 dias.
-            // A collectionQueue já filtra por <= 3 dias ou vencidos.
-            // Portanto, forçamos o tipo 'payment' para garantir que os dados PIX sejam enviados.
-            handleSendMessage(item, 'payment');
-
-            addLog('INFO', `[${i + 1}/${collectionQueue.length}] Processando ${item.customer.name}...`);
+            addLog('INFO', `[${i + 1}/${pending.length}] Processando ${item.customer.name}...`);
+            const result = await handleSendMessage(item, 'payment');
             
-            // Aguarda 2 segundos entre envios para evitar bloqueio do navegador/wpp
-            if (i < collectionQueue.length - 1) {
-                await delay(2000); 
+            if (result) {
+                sent++;
+            } else {
+                failed++;
+            }
+            
+            setBatchProgress({ current: i + 1, total: pending.length, sent, failed });
+            
+            if (i < pending.length - 1) {
+                await delay(2500);
             }
         }
 
         setIsBatchProcessing(false);
-        addLog('SUCCESS', 'Disparo em massa finalizado!');
+        const summary = `Disparo finalizado! ✅ ${sent} enviados, ❌ ${failed} falharam.`;
+        addLog('SUCCESS', summary);
+        setToast({ message: summary, type: sent > 0 ? 'success' : 'error' });
     };
+
+    // Load message history when switching to history tab
+    const loadHistory = useCallback(async () => {
+        const history = await getRecentMessages(50);
+        setMessageHistory(history);
+    }, []);
 
     return (<>
         <div className="space-y-6 animate-fadeIn">
@@ -364,6 +461,12 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                         >
                             Fila de Disparos
                             {collectionQueue.length > 0 && <span className="ml-2 bg-red-500 text-white text-[10px] px-1.5 rounded-full">{collectionQueue.length}</span>}
+                        </button>
+                        <button 
+                            onClick={() => { setViewMode('history'); loadHistory(); }}
+                            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${viewMode === 'history' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            Histórico
                         </button>
                     </div>
 
@@ -469,8 +572,8 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                                 Configurações Rápidas
                             </h3>
                             <div className="space-y-1">
-                                <ToggleSwitch enabled={true} onChange={() => {}} label="Envio Automático (Vencimento)" />
-                                <ToggleSwitch enabled={true} onChange={() => {}} label="Envio Automático (Boas Vindas)" />
+                                <ToggleSwitch enabled={settings.autoSendOverdue} onChange={(v) => handleSettingsChange('autoSendOverdue', v)} label="Envio Automático (Vencimento)" />
+                                <ToggleSwitch enabled={settings.autoSendWelcome} onChange={(v) => handleSettingsChange('autoSendWelcome', v)} label="Envio Automático (Boas Vindas)" />
                             </div>
                             
                             <div className="mt-6 pt-4 border-t border-slate-700">
@@ -479,11 +582,12 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                                     type="text" 
                                     placeholder="CPF, E-mail ou Aleatória" 
                                     className="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                                    value={settings.pixKey}
+                                    onChange={(e) => setSettings(prev => ({ ...prev, pixKey: e.target.value }))}
                                     onBlur={(e) => {
-                                        localStorage.setItem('iptv_pix_key', e.target.value);
+                                        handleSettingsChange('pixKey', e.target.value);
                                         addLog('INFO', 'Chave PIX atualizada.');
                                     }}
-                                    defaultValue={localStorage.getItem('iptv_pix_key') || ''}
                                 />
                             </div>
                             <div className="mt-3">
@@ -492,11 +596,12 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                                     type="text" 
                                     placeholder="Seu Nome ou Empresa" 
                                     className="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
+                                    value={settings.pixName}
+                                    onChange={(e) => setSettings(prev => ({ ...prev, pixName: e.target.value }))}
                                     onBlur={(e) => {
-                                        localStorage.setItem('iptv_pix_name', e.target.value);
+                                        handleSettingsChange('pixName', e.target.value);
                                         addLog('INFO', 'Nome do beneficiário atualizado.');
                                     }}
-                                    defaultValue={localStorage.getItem('iptv_pix_name') || ''}
                                 />
                             </div>
                         </div>
@@ -522,7 +627,7 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                         </div>
                     </div>
                 </div>
-            ) : (
+            ) : viewMode === 'collections' ? (
                 // --- COLLECTIONS VIEW ---
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-200px)] min-h-[600px]">
                     <div className="lg:col-span-12 flex flex-col gap-6">
@@ -535,6 +640,12 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-3">
+                                    {isBatchProcessing && (
+                                        <div className="flex items-center gap-2 bg-slate-700 px-3 py-2 rounded-lg text-xs text-white">
+                                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                            {batchProgress.current}/{batchProgress.total} • ✅{batchProgress.sent} ❌{batchProgress.failed}
+                                        </div>
+                                    )}
                                     <button
                                         onClick={handleBatchAutoSend}
                                         disabled={isBatchProcessing || collectionQueue.length === 0}
@@ -589,9 +700,10 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                                                 const isOverdue = new Date(sub.endDate) < new Date();
                                                 const daysDiff = Math.ceil((new Date(sub.endDate).getTime() - new Date().getTime()) / (1000 * 3600 * 24));
                                                 const isLoading = loadingAi === sub.id;
+                                                const alreadySent = sentTodayIds.has(sub.id);
                                                 
                                                 return (
-                                                    <tr key={sub.id} className="hover:bg-slate-700/30 transition-colors">
+                                                    <tr key={sub.id} className={`hover:bg-slate-700/30 transition-colors ${alreadySent ? 'opacity-60' : ''}`}>
                                                         <td className="p-4">
                                                             <div className="font-medium text-white">{customer.name}</div>
                                                             <div className="text-xs text-slate-500">{customer.phone}</div>
@@ -611,6 +723,11 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                                                             ) : (
                                                                 <span className="bg-yellow-500/20 text-yellow-300 px-2 py-1 rounded text-xs font-bold border border-yellow-500/30">
                                                                     VENCE EM {daysDiff} DIAS
+                                                                </span>
+                                                            )}
+                                                            {alreadySent && (
+                                                                <span className="ml-2 bg-green-500/20 text-green-300 px-2 py-1 rounded text-xs font-bold border border-green-500/30">
+                                                                    ✓ ENVIADO HOJE
                                                                 </span>
                                                             )}
                                                         </td>
@@ -663,6 +780,79 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                                     </tbody>
                                 </table>
                              </div>
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                // --- HISTORY VIEW ---
+                <div className="grid grid-cols-1 gap-6 h-[calc(100vh-200px)] min-h-[600px]">
+                    <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-lg flex-1 flex flex-col overflow-hidden">
+                        <div className="p-6 border-b border-slate-700 bg-slate-800/50 flex justify-between items-center">
+                            <div>
+                                <h3 className="text-xl font-bold text-white">Histórico de Mensagens</h3>
+                                <p className="text-slate-400 text-sm mt-1">Últimas 50 mensagens enviadas.</p>
+                            </div>
+                            <button
+                                onClick={loadHistory}
+                                className="flex items-center px-3 py-2 rounded-lg text-xs font-bold border border-slate-600 bg-slate-700 hover:bg-slate-600 text-slate-200 transition-all"
+                            >
+                                <Icon name="sparkles" className="w-4 h-4 mr-2" /> Atualizar
+                            </button>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left">
+                                <thead className="bg-slate-900/50 border-b border-slate-700">
+                                    <tr className="text-slate-400 uppercase text-xs">
+                                        <th className="p-4">Data/Hora</th>
+                                        <th className="p-4">Cliente</th>
+                                        <th className="p-4">Telefone</th>
+                                        <th className="p-4">Tipo</th>
+                                        <th className="p-4">Preview</th>
+                                        <th className="p-4">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-700">
+                                    {messageHistory.length > 0 ? (
+                                        messageHistory.map(msg => {
+                                            const customer = data?.customers.find(c => c.id === msg.customerId);
+                                            const typeLabels: Record<string, string> = {
+                                                reminder: 'Lembrete', payment: 'Cobrança PIX',
+                                                ai_reminder: 'IA Lembrete', ai_payment: 'IA Cobrança',
+                                                manual: 'Manual',
+                                            };
+                                            return (
+                                                <tr key={msg.id} className="hover:bg-slate-700/30 transition-colors">
+                                                    <td className="p-4 text-slate-300 text-sm whitespace-nowrap">
+                                                        {new Date(msg.sentAt).toLocaleString('pt-BR')}
+                                                    </td>
+                                                    <td className="p-4 text-white font-medium">{customer?.name || 'Desconhecido'}</td>
+                                                    <td className="p-4 text-slate-400 text-sm font-mono">{msg.phone}</td>
+                                                    <td className="p-4">
+                                                        <span className="bg-indigo-500/20 text-indigo-300 px-2 py-1 rounded text-xs font-bold">
+                                                            {typeLabels[msg.messageType] || msg.messageType}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-4 text-slate-400 text-xs max-w-[300px] truncate">{msg.messagePreview}</td>
+                                                    <td className="p-4">
+                                                        {msg.status === 'sent' ? (
+                                                            <span className="bg-green-500/20 text-green-300 px-2 py-1 rounded text-xs font-bold">Enviado</span>
+                                                        ) : (
+                                                            <span className="bg-red-500/20 text-red-300 px-2 py-1 rounded text-xs font-bold">Falhou</span>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })
+                                    ) : (
+                                        <tr>
+                                            <td colSpan={6} className="p-10 text-center text-slate-500">
+                                                <Icon name="check-circle" className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                                                <p>Nenhuma mensagem no histórico.</p>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>

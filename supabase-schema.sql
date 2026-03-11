@@ -92,3 +92,42 @@ INSERT INTO subscriptions (id, customer_id, plan_id, server_id, start_date, end_
     ('sub3', 'c3', 'p3', 's3', NOW() - INTERVAL '5 days', NOW() + INTERVAL '85 days', 'Ativa', false),
     ('sub4', 'c4', 'p1', 's3', NOW(), NOW() + INTERVAL '30 days', 'Confiança', true)
 ON CONFLICT (id) DO NOTHING;
+
+-- =====================================================
+-- 8. Tabela de Configurações de Automação
+-- =====================================================
+CREATE TABLE IF NOT EXISTS automation_settings (
+    id TEXT PRIMARY KEY DEFAULT 'default',
+    pix_key TEXT DEFAULT '',
+    pix_name TEXT DEFAULT '',
+    auto_send_overdue BOOLEAN DEFAULT true,
+    auto_send_welcome BOOLEAN DEFAULT false,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE automation_settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all on automation_settings" ON automation_settings FOR ALL USING (true) WITH CHECK (true);
+
+INSERT INTO automation_settings (id, pix_key, pix_name, auto_send_overdue, auto_send_welcome)
+VALUES ('default', '', '', true, false)
+ON CONFLICT (id) DO NOTHING;
+
+-- =====================================================
+-- 9. Tabela de Histórico de Mensagens
+-- =====================================================
+CREATE TABLE IF NOT EXISTS message_history (
+    id TEXT PRIMARY KEY,
+    customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    subscription_id TEXT REFERENCES subscriptions(id) ON DELETE SET NULL,
+    message_type TEXT NOT NULL DEFAULT 'manual',
+    phone TEXT NOT NULL,
+    message_preview TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'sent',
+    sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_history_customer ON message_history(customer_id);
+CREATE INDEX IF NOT EXISTS idx_message_history_sent_at ON message_history(sent_at);
+
+ALTER TABLE message_history ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all on message_history" ON message_history FOR ALL USING (true) WITH CHECK (true);
