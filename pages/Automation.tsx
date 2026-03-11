@@ -110,7 +110,7 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
     // Automation Settings (from Supabase)
     const [settings, setSettings] = useState<AutomationSettings>({
         pixKey: '', pixName: '', autoSendOverdue: true, autoSendWelcome: false,
-        evoApiUrl: '', evoApiKey: '', evoInstanceName: 'iptv-manager',
+        evoApiUrl: 'http://localhost:8080', evoApiKey: 'iptv-manager-local-key', evoInstanceName: 'iptv-manager',
     });
     const [settingsLoaded, setSettingsLoaded] = useState(false);
     const [showApiConfig, setShowApiConfig] = useState(false);
@@ -644,11 +644,11 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                                             </div>
                                             {showApiConfig && (
                                                 <div className="mt-4 p-4 bg-slate-900 rounded-lg border border-slate-700 space-y-3">
-                                                    <p className="text-xs text-slate-500 mb-2">Configure sua <a href="https://doc.evolution-api.com" target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline">Evolution API</a>:</p>
+                                                    <p className="text-xs text-slate-500 mb-2">Configure sua <a href="https://doc.evolution-api.com" target="_blank" rel="noopener noreferrer" className="text-indigo-400 underline">Evolution API</a> ou use o servidor local (<code className="text-green-400">npm run whatsapp</code>):</p>
                                                     <div>
                                                         <label className="text-xs text-slate-400 block mb-1">URL da API</label>
                                                         <input 
-                                                            type="text" placeholder="https://api.seusite.com"
+                                                            type="text" placeholder="http://localhost:8080"
                                                             className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
                                                             value={settings.evoApiUrl}
                                                             onChange={(e) => setSettings(prev => ({ ...prev, evoApiUrl: e.target.value }))}
@@ -658,7 +658,7 @@ export const Automation: React.FC<AutomationProps> = ({ data }) => {
                                                     <div>
                                                         <label className="text-xs text-slate-400 block mb-1">API Key (Global)</label>
                                                         <input 
-                                                            type="password" placeholder="Sua API Key"
+                                                            type="password" placeholder="iptv-manager-local-key"
                                                             className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500"
                                                             value={settings.evoApiKey}
                                                             onChange={(e) => setSettings(prev => ({ ...prev, evoApiKey: e.target.value }))}
